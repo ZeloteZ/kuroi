@@ -69,6 +69,7 @@ async function apiFetch<T>(path: string, token: string, init?: RequestInit): Pro
 }
 
 function App() {
+  const ACCOUNTS_PER_PAGE = 10;
   const [token, setToken] = useState(localStorage.getItem("kuroi_token") ?? "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -85,6 +86,7 @@ function App() {
   const [massImportPublic, setMassImportPublic] = useState(false);
   const [massImportResult, setMassImportResult] = useState<MassImportResponse | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [newAccount, setNewAccount] = useState({
     username: "",
@@ -107,6 +109,12 @@ function App() {
   });
 
   const isLoggedIn = useMemo(() => token.length > 0, [token]);
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(accounts.length / ACCOUNTS_PER_PAGE)), [accounts.length]);
+  const pageNumbers = useMemo(() => Array.from({ length: totalPages }, (_, index) => index + 1), [totalPages]);
+  const paginatedAccounts = useMemo(() => {
+    const start = (currentPage - 1) * ACCOUNTS_PER_PAGE;
+    return accounts.slice(start, start + ACCOUNTS_PER_PAGE);
+  }, [accounts, currentPage]);
 
   useEffect(() => {
     const hash = window.location.hash.replace(/^#/, "");
@@ -164,7 +172,14 @@ function App() {
     const query = params.toString() ? `?${params.toString()}` : "";
     const data = await apiFetch<Account[]>(`/accounts${query}`, token);
     setAccounts(data);
+    setCurrentPage(1);
   };
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   useEffect(() => {
     if (!token) {
@@ -496,6 +511,132 @@ function App() {
               <button className="anime-primary-button md:col-span-3">Save Account</button>
             </form>
 
+            {editingAccountId && (
+              <form onSubmit={handleUpdateAccount} className="anime-panel grid gap-3 rounded-3xl p-4 md:grid-cols-3">
+                <input className="anime-input" placeholder="Username" value={editAccount.username} onChange={(event) => setEditAccount({ ...editAccount, username: event.target.value })} />
+                <input className="anime-input" placeholder="Email" value={editAccount.email} onChange={(event) => setEditAccount({ ...editAccount, email: event.target.value })} />
+                <input type="password" className="anime-input" placeholder="Password" value={editAccount.password} onChange={(event) => setEditAccount({ ...editAccount, password: event.target.value })} />
+                <select className="anime-input" value={editAccount.ban_type} onChange={(event) => setEditAccount({ ...editAccount, ban_type: event.target.value as BanType })}>
+                  <option value="None">Not banned</option>
+                  <option value="VAC">VAC</option>
+                  <option value="GameBanned">Game Banned</option>
+                  <option value="VACLive">VAC Live</option>
+                </select>
+                {editAccount.ban_type === "VACLive" && (
+                  <>
+                    <input
+                      className="anime-input"
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={editAccount.vac_live_value}
+                      onChange={(event) => setEditAccount({ ...editAccount, vac_live_value: event.target.value })}
+                    />
+                    <select className="anime-input" value={editAccount.vac_live_unit} onChange={(event) => setEditAccount({ ...editAccount, vac_live_unit: event.target.value as "hours" | "days" })}>
+                      <option value="hours">Hours</option>
+                      <option value="days">Days</option>
+                    </select>
+                  </>
+                )}
+                <label className="anime-input flex items-center gap-2">
+                  <input type="checkbox" checked={editAccount.is_public} onChange={(event) => setEditAccount({ ...editAccount, is_public: event.target.checked })} />
+                  Public visibility
+                </label>
+                <div className="md:col-span-3 flex gap-3">
+                  <button className="anime-primary-button">Save Changes</button>
+                  <button type="button" className="anime-secondary-button" onClick={() => setEditingAccountId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="anime-panel overflow-hidden rounded-3xl">
+              <table className="min-w-full divide-y divide-zinc-700/60">
+                <thead className="bg-zinc-900/70">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Avatar</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Username</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Email</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Password</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Ban Type</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Visibility</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-700/50">
+                  {paginatedAccounts.map((account) => (
+                    <tr key={account.id} className="hover:bg-zinc-800/35">
+                      <td className="px-4 py-3">
+                        {account.avatar_url ? <img src={account.avatar_url} alt="Avatar" className="h-9 w-9 rounded-full border border-zinc-600" /> : <div className="h-9 w-9 rounded-full bg-zinc-700" />}
+                      </td>
+                      <td className="px-4 py-3">{account.username}</td>
+                      <td className="px-4 py-3">{account.email}</td>
+                      <td className="px-4 py-3">{account.password}</td>
+                      <td className="px-4 py-3">{account.ban_type}</td>
+                      <td className="px-4 py-3">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
+                      <td className="px-4 py-3">{account.is_public ? "Public" : "Private"}</td>
+                      <td className="px-4 py-3">
+                        {currentUserId === account.owner_id ? (
+                          <div className="flex gap-2">
+                            <button type="button" className="anime-secondary-button px-2 py-1 text-xs" onClick={() => startEditAccount(account)}>
+                              Edit
+                            </button>
+                            <button type="button" className="rounded-lg border border-rose-400/40 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/20" onClick={() => handleDeleteAccount(account.id)}>
+                              Delete
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-zinc-400">View only</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="anime-panel flex items-center justify-between rounded-3xl p-4 text-sm">
+              <p className="text-zinc-300">
+                Page {currentPage} of {totalPages} · Showing up to {ACCOUNTS_PER_PAGE} accounts per page
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="anime-secondary-button px-3 py-2 disabled:opacity-50"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                >
+                  Previous
+                </button>
+                <div className="flex items-center gap-1">
+                  {pageNumbers.map((pageNumber) => (
+                    <button
+                      key={pageNumber}
+                      type="button"
+                      className={`rounded-lg border px-3 py-2 text-xs transition ${
+                        pageNumber === currentPage
+                          ? "border-fuchsia-300/60 bg-fuchsia-500/20 text-fuchsia-100"
+                          : "border-zinc-600/70 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-700/70"
+                      }`}
+                      onClick={() => setCurrentPage(pageNumber)}
+                    >
+                      {pageNumber}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="anime-secondary-button px-3 py-2 disabled:opacity-50"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+
             <form onSubmit={handleCreateApiKey} className="anime-panel rounded-3xl p-4">
               <p className="mb-3 text-sm text-zinc-300">Create an API key for script-based account imports (Stace-style automation).</p>
               <div className="grid gap-3 md:grid-cols-[1fr_auto]">
@@ -557,92 +698,6 @@ function App() {
                 </div>
               )}
             </form>
-
-            {editingAccountId && (
-              <form onSubmit={handleUpdateAccount} className="anime-panel grid gap-3 rounded-3xl p-4 md:grid-cols-3">
-                <input className="anime-input" placeholder="Username" value={editAccount.username} onChange={(event) => setEditAccount({ ...editAccount, username: event.target.value })} />
-                <input className="anime-input" placeholder="Email" value={editAccount.email} onChange={(event) => setEditAccount({ ...editAccount, email: event.target.value })} />
-                <input type="password" className="anime-input" placeholder="Password" value={editAccount.password} onChange={(event) => setEditAccount({ ...editAccount, password: event.target.value })} />
-                <select className="anime-input" value={editAccount.ban_type} onChange={(event) => setEditAccount({ ...editAccount, ban_type: event.target.value as BanType })}>
-                  <option value="None">Not banned</option>
-                  <option value="VAC">VAC</option>
-                  <option value="GameBanned">Game Banned</option>
-                  <option value="VACLive">VAC Live</option>
-                </select>
-                {editAccount.ban_type === "VACLive" && (
-                  <>
-                    <input
-                      className="anime-input"
-                      type="number"
-                      min={1}
-                      max={365}
-                      value={editAccount.vac_live_value}
-                      onChange={(event) => setEditAccount({ ...editAccount, vac_live_value: event.target.value })}
-                    />
-                    <select className="anime-input" value={editAccount.vac_live_unit} onChange={(event) => setEditAccount({ ...editAccount, vac_live_unit: event.target.value as "hours" | "days" })}>
-                      <option value="hours">Hours</option>
-                      <option value="days">Days</option>
-                    </select>
-                  </>
-                )}
-                <label className="anime-input flex items-center gap-2">
-                  <input type="checkbox" checked={editAccount.is_public} onChange={(event) => setEditAccount({ ...editAccount, is_public: event.target.checked })} />
-                  Public visibility
-                </label>
-                <div className="md:col-span-3 flex gap-3">
-                  <button className="anime-primary-button">Save Changes</button>
-                  <button type="button" className="anime-secondary-button" onClick={() => setEditingAccountId(null)}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            )}
-
-            <div className="anime-panel overflow-hidden rounded-3xl">
-              <table className="min-w-full divide-y divide-zinc-700/60">
-                <thead className="bg-zinc-900/70">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Avatar</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Username</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Email</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Password</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Ban Type</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Visibility</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-700/50">
-                  {accounts.map((account) => (
-                    <tr key={account.id} className="hover:bg-zinc-800/35">
-                      <td className="px-4 py-3">
-                        {account.avatar_url ? <img src={account.avatar_url} alt="Avatar" className="h-9 w-9 rounded-full border border-zinc-600" /> : <div className="h-9 w-9 rounded-full bg-zinc-700" />}
-                      </td>
-                      <td className="px-4 py-3">{account.username}</td>
-                      <td className="px-4 py-3">{account.email}</td>
-                      <td className="px-4 py-3">{account.password}</td>
-                      <td className="px-4 py-3">{account.ban_type}</td>
-                      <td className="px-4 py-3">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
-                      <td className="px-4 py-3">{account.is_public ? "Public" : "Private"}</td>
-                      <td className="px-4 py-3">
-                        {currentUserId === account.owner_id ? (
-                          <div className="flex gap-2">
-                            <button type="button" className="anime-secondary-button px-2 py-1 text-xs" onClick={() => startEditAccount(account)}>
-                              Edit
-                            </button>
-                            <button type="button" className="rounded-lg border border-rose-400/40 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/20" onClick={() => handleDeleteAccount(account.id)}>
-                              Delete
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-zinc-400">View only</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
         )}
 
