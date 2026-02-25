@@ -538,7 +538,7 @@ function App() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_15%_20%,rgba(99,102,241,0.25),transparent_42%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:22px_22px]" />
 
-      <div className="relative mx-auto max-w-6xl space-y-6">
+      <div className="relative mx-auto max-w-screen-2xl space-y-6">
         <header className="anime-panel rounded-3xl p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-4">
@@ -655,7 +655,7 @@ function App() {
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">MM Ready</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Visibility</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
+                    <th className="px-4 py-3 pr-6 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-700/50">
@@ -682,7 +682,7 @@ function App() {
                       <td className="px-4 py-3">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
                       <td className="px-4 py-3">{account.matchmaking_ready ? "Yes" : "No"}</td>
                       <td className="px-4 py-3">{account.is_public ? "Public" : "Private"}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 pr-6">
                         {currentUserId === account.owner_id ? (
                           <div className="flex gap-2">
                             <button type="button" className="anime-secondary-button px-2 py-1 text-xs" onClick={() => startEditAccount(account)}>
