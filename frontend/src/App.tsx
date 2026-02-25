@@ -1,0 +1,573 @@
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import kuroiLogo from "./assets/kuroi-logo.svg";
+
+type BanType = "None" | "VAC" | "GameBanned" | "VACLive";
+
+type Account = {
+  id: number;
+  owner_id: number;
+  username: string;
+  password: string;
+  email: string;
+  ban_type: BanType;
+  vac_live_remaining?: string | null;
+  is_public: boolean;
+  avatar_url?: string | null;
+  created_at: string;
+};
+
+type UserProfile = {
+  id: number;
+  username: string;
+  email?: string | null;
+};
+
+type AuthConfig = {
+  oidc_enabled: boolean;
+  oidc_configured: boolean;
+};
+
+type ApiKeyResponse = {
+  id: number;
+  name: string;
+  api_key: string;
+  key_prefix: string;
+  created_at: string;
+};
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const oidcEnabledFromEnv = (import.meta.env.VITE_OIDC_ENABLED ?? "false") === "true";
+
+async function apiFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail ?? "Request failed");
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function App() {
+  const [token, setToken] = useState(localStorage.getItem("kuroi_token") ?? "");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [banFilter, setBanFilter] = useState<"all" | BanType>("all");
+  const [showPublicAccounts, setShowPublicAccounts] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [error, setError] = useState("");
+  const [oidcVisible, setOidcVisible] = useState(oidcEnabledFromEnv);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
+  const [generatedApiKey, setGeneratedApiKey] = useState("");
+  const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
+
+  const [newAccount, setNewAccount] = useState({
+    username: "",
+    password: "",
+    email: "",
+    ban_type: "None" as BanType,
+    vac_live_value: "24",
+    vac_live_unit: "hours" as "hours" | "days",
+    is_public: false,
+  });
+
+  const [editAccount, setEditAccount] = useState({
+    username: "",
+    password: "",
+    email: "",
+    ban_type: "None" as BanType,
+    vac_live_value: "24",
+    vac_live_unit: "hours" as "hours" | "days",
+    is_public: false,
+  });
+
+  const isLoggedIn = useMemo(() => token.length > 0, [token]);
+
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (!hash) {
+      return;
+    }
+
+    const params = new URLSearchParams(hash);
+    const newToken = params.get("token");
+    const oidcError = params.get("error");
+
+    if (newToken) {
+      setToken(newToken);
+      localStorage.setItem("kuroi_token", newToken);
+    }
+
+    if (oidcError) {
+      setError(oidcError);
+    }
+
+    if (newToken || oidcError) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadAuthConfig = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/auth/config`);
+        if (!response.ok) {
+          return;
+        }
+        const config = (await response.json()) as AuthConfig;
+        setOidcVisible(config.oidc_enabled);
+      } catch {
+        setOidcVisible(oidcEnabledFromEnv);
+      }
+    };
+
+    loadAuthConfig();
+  }, []);
+
+  const loadAccounts = async (filter = banFilter, includePublic = showPublicAccounts) => {
+    if (!token) {
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (filter !== "all") {
+      params.set("ban_type", filter);
+    }
+    if (includePublic) {
+      params.set("include_public", "true");
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await apiFetch<Account[]>(`/accounts${query}`, token);
+    setAccounts(data);
+  };
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    loadAccounts();
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const loadProfile = async () => {
+      try {
+        const me = await apiFetch<UserProfile>("/auth/me", token);
+        setCurrentUserId(me.id);
+      } catch {
+        setCurrentUserId(null);
+      }
+    };
+
+    loadProfile();
+  }, [token]);
+
+  const handleLocalLogin = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/local-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail ?? "Local login failed");
+      }
+      setToken(data.access_token);
+      localStorage.setItem("kuroi_token", data.access_token);
+      await loadAccounts();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unexpected error");
+    }
+  };
+
+  const handleOidcLogin = async () => {
+    setError("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/oidc/login`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail ?? "OIDC login initialization failed");
+      }
+      if (!data.authorization_url) {
+        throw new Error("OIDC authorization URL is missing");
+      }
+      window.location.href = data.authorization_url;
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unexpected OIDC error");
+    }
+  };
+
+  const handleCreateAccount = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+
+    try {
+      const payload: Record<string, unknown> = {
+        username: newAccount.username,
+        password: newAccount.password,
+        email: newAccount.email,
+        ban_type: newAccount.ban_type,
+        is_public: newAccount.is_public,
+      };
+
+      if (newAccount.ban_type === "VACLive") {
+        payload.vac_live_value = Number(newAccount.vac_live_value);
+        payload.vac_live_unit = newAccount.vac_live_unit;
+      }
+
+      await apiFetch<Account>("/accounts", token, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      setNewAccount({
+        username: "",
+        password: "",
+        email: "",
+        ban_type: "None",
+        vac_live_value: "24",
+        vac_live_unit: "hours",
+        is_public: false,
+      });
+      await loadAccounts();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unexpected error");
+    }
+  };
+
+  const handleCreateApiKey = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+
+    try {
+      const response = await apiFetch<ApiKeyResponse>("/auth/api-keys", token, {
+        method: "POST",
+        body: JSON.stringify({ name: "automation-script" }),
+      });
+      setGeneratedApiKey(response.api_key);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unexpected API key error");
+    }
+  };
+
+  const handleFilterChange = async (value: "all" | BanType) => {
+    setBanFilter(value);
+    await loadAccounts(value, showPublicAccounts);
+  };
+
+  const handlePublicToggle = async (value: boolean) => {
+    setShowPublicAccounts(value);
+    await loadAccounts(banFilter, value);
+  };
+
+  const startEditAccount = (account: Account) => {
+    setEditingAccountId(account.id);
+    setEditAccount({
+      username: account.username,
+      password: account.password,
+      email: account.email,
+      ban_type: account.ban_type,
+      vac_live_value: "24",
+      vac_live_unit: "hours",
+      is_public: account.is_public,
+    });
+  };
+
+  const handleUpdateAccount = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editingAccountId) {
+      return;
+    }
+
+    setError("");
+    try {
+      const payload: Record<string, unknown> = {
+        username: editAccount.username,
+        password: editAccount.password,
+        email: editAccount.email,
+        ban_type: editAccount.ban_type,
+        is_public: editAccount.is_public,
+      };
+      if (editAccount.ban_type === "VACLive") {
+        payload.vac_live_value = Number(editAccount.vac_live_value);
+        payload.vac_live_unit = editAccount.vac_live_unit;
+      }
+
+      await apiFetch<Account>(`/accounts/${editingAccountId}`, token, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      setEditingAccountId(null);
+      await loadAccounts();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unexpected update error");
+    }
+  };
+
+  const handleDeleteAccount = async (accountId: number) => {
+    const confirmed = window.confirm("Do you really want to delete this account?");
+    if (!confirmed) {
+      return;
+    }
+
+    setError("");
+    try {
+      const response = await fetch(`${apiBaseUrl}/accounts/${accountId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail ?? "Delete failed");
+      }
+      if (editingAccountId === accountId) {
+        setEditingAccountId(null);
+      }
+      await loadAccounts();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unexpected delete error");
+    }
+  };
+
+  const handleLogout = () => {
+    setToken("");
+    setAccounts([]);
+    setGeneratedApiKey("");
+    localStorage.removeItem("kuroi_token");
+  };
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-zinc-950 px-4 py-8 text-zinc-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_15%_20%,rgba(99,102,241,0.25),transparent_42%)]" />
+      <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:22px_22px]" />
+
+      <div className="relative mx-auto max-w-6xl space-y-6">
+        <header className="anime-panel rounded-3xl p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-4">
+              <img src={kuroiLogo} alt="kuroi logo" className="h-14 w-14 rounded-2xl border border-fuchsia-300/40 bg-zinc-950/90 p-1" />
+              <div>
+              <h1 className="bg-gradient-to-r from-fuchsia-200 via-sky-200 to-indigo-200 bg-clip-text text-3xl font-semibold tracking-tight text-transparent">
+                kuroi 黒い
+              </h1>
+              <p className="mt-2 text-zinc-300/85">Steam account management with ban intelligence and automation-first workflows.</p>
+              </div>
+            </div>
+            <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-500/15 px-3 py-1 text-xs font-medium text-fuchsia-200">Tokyo Neon</span>
+          </div>
+        </header>
+
+        {!isLoggedIn ? (
+          <div className="anime-panel rounded-3xl p-6">
+            <form onSubmit={handleLocalLogin} className="grid gap-4 md:grid-cols-3">
+              <input className="anime-input" placeholder="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
+              <input type="password" className="anime-input" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} />
+              <button className="anime-primary-button">Login with Password</button>
+            </form>
+
+            {oidcVisible && (
+              <button type="button" className="anime-secondary-button mt-4 w-full" onClick={handleOidcLogin}>
+                Login with OAuth (OIDC)
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="anime-panel flex flex-wrap items-center gap-3 rounded-3xl p-4">
+              <label className="text-sm text-zinc-300">Ban Type</label>
+              <select className="anime-input max-w-44" value={banFilter} onChange={(event) => handleFilterChange(event.target.value as "all" | BanType)}>
+                <option value="all">All</option>
+                <option value="None">Not banned</option>
+                <option value="VAC">VAC</option>
+                <option value="GameBanned">Game Banned</option>
+                <option value="VACLive">VAC Live</option>
+              </select>
+              <button className="anime-secondary-button px-4 py-2" onClick={() => loadAccounts()}>
+                Refresh
+              </button>
+              <label className="anime-input flex items-center gap-2 px-3 py-2">
+                <input type="checkbox" checked={showPublicAccounts} onChange={(event) => handlePublicToggle(event.target.checked)} />
+                Show public accounts
+              </label>
+              <button className="ml-auto rounded-xl border border-rose-300/40 bg-rose-500/10 px-4 py-2 text-rose-200 hover:bg-rose-500/20" onClick={handleLogout}>
+                Logout
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAccount} className="anime-panel grid gap-3 rounded-3xl p-4 md:grid-cols-3">
+              <input className="anime-input" placeholder="Username" value={newAccount.username} onChange={(event) => setNewAccount({ ...newAccount, username: event.target.value })} />
+              <input className="anime-input" placeholder="Email" value={newAccount.email} onChange={(event) => setNewAccount({ ...newAccount, email: event.target.value })} />
+              <input type="password" className="anime-input" placeholder="Password" value={newAccount.password} onChange={(event) => setNewAccount({ ...newAccount, password: event.target.value })} />
+
+              <select className="anime-input" value={newAccount.ban_type} onChange={(event) => setNewAccount({ ...newAccount, ban_type: event.target.value as BanType })}>
+                <option value="None">Not banned</option>
+                <option value="VAC">VAC</option>
+                <option value="GameBanned">Game Banned</option>
+                <option value="VACLive">VAC Live</option>
+              </select>
+
+              {newAccount.ban_type === "VACLive" && (
+                <>
+                  <input
+                    className="anime-input"
+                    type="number"
+                    min={1}
+                    max={365}
+                    placeholder="Duration"
+                    value={newAccount.vac_live_value}
+                    onChange={(event) => setNewAccount({ ...newAccount, vac_live_value: event.target.value })}
+                  />
+                  <select className="anime-input" value={newAccount.vac_live_unit} onChange={(event) => setNewAccount({ ...newAccount, vac_live_unit: event.target.value as "hours" | "days" })}>
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                  </select>
+                </>
+              )}
+
+              <label className="anime-input flex items-center gap-2">
+                <input type="checkbox" checked={newAccount.is_public} onChange={(event) => setNewAccount({ ...newAccount, is_public: event.target.checked })} />
+                Public visibility
+              </label>
+              <button className="anime-primary-button md:col-span-3">Save Account</button>
+            </form>
+
+            <form onSubmit={handleCreateApiKey} className="anime-panel rounded-3xl p-4">
+              <p className="mb-3 text-sm text-zinc-300">Create an API key for script-based account imports (Stace-style automation).</p>
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <p className="anime-input flex items-center">Default key name: automation-script</p>
+                <button className="anime-primary-button px-4">Generate API Key</button>
+              </div>
+              {generatedApiKey && (
+                <div className="mt-3 space-y-2 rounded-xl border border-emerald-300/30 bg-emerald-500/10 p-3 text-sm">
+                  <p className="text-emerald-200">Copy this key now (shown once in clear text):</p>
+                  <p className="break-all rounded-md bg-zinc-950/80 p-2 font-mono text-emerald-200">{generatedApiKey}</p>
+                  <p className="text-zinc-300">Example script call:</p>
+                  <pre className="overflow-x-auto rounded-md bg-zinc-950/80 p-2 text-xs text-zinc-200">
+{`curl -X POST ${apiBaseUrl}/accounts \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${generatedApiKey}" \\
+  -d '{
+    "username": "demo_user",
+    "password": "demo_pass",
+    "email": "demo@example.com",
+    "ban_type": "None",
+    "is_public": false
+  }'`}
+                  </pre>
+                </div>
+              )}
+            </form>
+
+            {editingAccountId && (
+              <form onSubmit={handleUpdateAccount} className="anime-panel grid gap-3 rounded-3xl p-4 md:grid-cols-3">
+                <input className="anime-input" placeholder="Username" value={editAccount.username} onChange={(event) => setEditAccount({ ...editAccount, username: event.target.value })} />
+                <input className="anime-input" placeholder="Email" value={editAccount.email} onChange={(event) => setEditAccount({ ...editAccount, email: event.target.value })} />
+                <input type="password" className="anime-input" placeholder="Password" value={editAccount.password} onChange={(event) => setEditAccount({ ...editAccount, password: event.target.value })} />
+                <select className="anime-input" value={editAccount.ban_type} onChange={(event) => setEditAccount({ ...editAccount, ban_type: event.target.value as BanType })}>
+                  <option value="None">Not banned</option>
+                  <option value="VAC">VAC</option>
+                  <option value="GameBanned">Game Banned</option>
+                  <option value="VACLive">VAC Live</option>
+                </select>
+                {editAccount.ban_type === "VACLive" && (
+                  <>
+                    <input
+                      className="anime-input"
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={editAccount.vac_live_value}
+                      onChange={(event) => setEditAccount({ ...editAccount, vac_live_value: event.target.value })}
+                    />
+                    <select className="anime-input" value={editAccount.vac_live_unit} onChange={(event) => setEditAccount({ ...editAccount, vac_live_unit: event.target.value as "hours" | "days" })}>
+                      <option value="hours">Hours</option>
+                      <option value="days">Days</option>
+                    </select>
+                  </>
+                )}
+                <label className="anime-input flex items-center gap-2">
+                  <input type="checkbox" checked={editAccount.is_public} onChange={(event) => setEditAccount({ ...editAccount, is_public: event.target.checked })} />
+                  Public visibility
+                </label>
+                <div className="md:col-span-3 flex gap-3">
+                  <button className="anime-primary-button">Save Changes</button>
+                  <button type="button" className="anime-secondary-button" onClick={() => setEditingAccountId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="anime-panel overflow-hidden rounded-3xl">
+              <table className="min-w-full divide-y divide-zinc-700/60">
+                <thead className="bg-zinc-900/70">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Avatar</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Username</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Email</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Password</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Ban Type</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Visibility</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-700/50">
+                  {accounts.map((account) => (
+                    <tr key={account.id} className="hover:bg-zinc-800/35">
+                      <td className="px-4 py-3">
+                        {account.avatar_url ? <img src={account.avatar_url} alt="Avatar" className="h-9 w-9 rounded-full border border-zinc-600" /> : <div className="h-9 w-9 rounded-full bg-zinc-700" />}
+                      </td>
+                      <td className="px-4 py-3">{account.username}</td>
+                      <td className="px-4 py-3">{account.email}</td>
+                      <td className="px-4 py-3">{account.password}</td>
+                      <td className="px-4 py-3">{account.ban_type}</td>
+                      <td className="px-4 py-3">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
+                      <td className="px-4 py-3">{account.is_public ? "Public" : "Private"}</td>
+                      <td className="px-4 py-3">
+                        {currentUserId === account.owner_id ? (
+                          <div className="flex gap-2">
+                            <button type="button" className="anime-secondary-button px-2 py-1 text-xs" onClick={() => startEditAccount(account)}>
+                              Edit
+                            </button>
+                            <button type="button" className="rounded-lg border border-rose-400/40 px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/20" onClick={() => handleDeleteAccount(account.id)}>
+                              Delete
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-zinc-400">View only</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {error && <div className="rounded-xl border border-rose-300/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+export default App;
