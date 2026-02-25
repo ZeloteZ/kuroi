@@ -9,6 +9,9 @@
 
 ---
 
+> [!NOTE]
+> kuroi is mostly vibe-coded.
+
 ## Production model (simplified)
 
 Production now uses **one application image** (`kuroi-app`) plus **one database** (`postgres`).

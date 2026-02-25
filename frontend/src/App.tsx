@@ -77,6 +77,7 @@ function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [banFilter, setBanFilter] = useState<"all" | BanType>("all");
+  const [usernameSearch, setUsernameSearch] = useState("");
   const [sortOption, setSortOption] = useState<SortOption>("mm_ready");
   const [showPublicAccounts, setShowPublicAccounts] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -116,8 +117,16 @@ function App() {
   });
 
   const isLoggedIn = useMemo(() => token.length > 0, [token]);
+  const filteredAccounts = useMemo(() => {
+    const query = usernameSearch.trim().toLowerCase();
+    if (!query) {
+      return accounts;
+    }
+    return accounts.filter((account) => account.username.toLowerCase().includes(query));
+  }, [accounts, usernameSearch]);
+
   const sortedAccounts = useMemo(() => {
-    const items = [...accounts];
+    const items = [...filteredAccounts];
 
     if (sortOption === "mm_ready") {
       return items.sort((a, b) => {
@@ -150,7 +159,7 @@ function App() {
     }
 
     return items.sort((a, b) => b.username.localeCompare(a.username));
-  }, [accounts, sortOption]);
+  }, [filteredAccounts, sortOption]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(sortedAccounts.length / ACCOUNTS_PER_PAGE)), [sortedAccounts.length]);
   const pageNumbers = useMemo(() => Array.from({ length: totalPages }, (_, index) => index + 1), [totalPages]);
@@ -237,6 +246,10 @@ function App() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [usernameSearch]);
 
   useEffect(() => {
     if (currentUserId === null) {
@@ -626,6 +639,13 @@ function App() {
                 <option value="GameBanned">Game Banned</option>
                 <option value="VACLive">VAC Live</option>
               </select>
+              <label className="text-sm text-zinc-300">Search</label>
+              <input
+                className="anime-input max-w-64"
+                placeholder="Search username"
+                value={usernameSearch}
+                onChange={(event) => setUsernameSearch(event.target.value)}
+              />
               <label className="text-sm text-zinc-300">Sort</label>
               <select className="anime-input max-w-56" value={sortOption} onChange={(event) => setSortOption(event.target.value as SortOption)}>
                 <option value="mm_ready">MM Ready (default)</option>
