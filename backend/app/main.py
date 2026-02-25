@@ -704,13 +704,16 @@ def mass_import_accounts(
         if not line:
             continue
 
-        candidate = line.split(":", 1)[1].strip() if ":" in line else line
-        parts = [part.strip() for part in candidate.split("|")]
+        parts = [part.strip() for part in line.split("|")]
         if len(parts) != 3:
             errors.append(MassImportError(line=line_number, message="Invalid format, expected: email | username | password", raw=raw_line))
             continue
 
-        email, username, password = parts
+        email_with_optional_timestamp, username, password = parts
+        email = email_with_optional_timestamp
+        if ": " in email_with_optional_timestamp:
+            email = email_with_optional_timestamp.split(": ", 1)[1].strip()
+
         if not email or not username or not password:
             errors.append(MassImportError(line=line_number, message="Email, username and password are required", raw=raw_line))
             continue
