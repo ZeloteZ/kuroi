@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     oidc_use_pkce: bool = True
 
     steam_api_key: str | None = None
-    steam_status_refresh_seconds: int = 300
+    steam_status_refresh_seconds: int = 30
 
 
 @lru_cache
@@ -124,6 +124,8 @@ def ensure_schema_extensions() -> None:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN online_status VARCHAR(32)")
         if "game_status" not in column_names:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN game_status VARCHAR(255)")
+        if "steam_profile_name" not in column_names:
+            connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_profile_name VARCHAR(255)")
 
         if steam_id64_is_nullable:
             connection.execute(
@@ -334,6 +336,7 @@ def serialize_account(account: SteamAccount) -> SteamAccountOut:
         "matchmaking_ready": account.matchmaking_ready,
         "is_public": account.is_public,
         "avatar_url": account.avatar_url,
+        "steam_profile_name": account.steam_profile_name,
         "online_status": account.online_status,
         "game_status": account.game_status,
         "created_at": account.created_at,
@@ -412,6 +415,8 @@ async def refresh_matchmaking_accounts_steam_presence() -> None:
                     avatar_url = player.get("avatarfull")
                     if avatar_url:
                         account.avatar_url = str(avatar_url)
+                    persona_name = player.get("personaname")
+                    account.steam_profile_name = str(persona_name).strip() if persona_name else None
                     account.online_status, account.game_status = _resolve_steam_presence(player)
 
                 missing_ids = set(id_chunk) - seen_ids
@@ -419,6 +424,7 @@ async def refresh_matchmaking_accounts_steam_presence() -> None:
                     account = steamid_to_account.get(missing_id)
                     if not account:
                         continue
+                    account.steam_profile_name = None
                     account.online_status = "Unknown"
                     account.game_status = None
 
@@ -495,6 +501,7 @@ def create_account_record(
         ban_type=ban_type.value,
         vac_live_expires_at=vac_live_expires_at,
         avatar_url=None,
+        steam_profile_name=None,
         online_status=None,
         game_status=None,
     )

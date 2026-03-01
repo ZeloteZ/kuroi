@@ -10,6 +10,7 @@ type Account = {
   password: string;
   email: string;
   steam_id64?: string | null;
+  steam_profile_name?: string | null;
   online_status?: string | null;
   game_status?: string | null;
   ban_type: BanType;
@@ -708,6 +709,8 @@ function App() {
     return account.online_status ?? "Unknown";
   };
 
+  const getAvatarHoverTitle = (account: Account) => account.steam_profile_name ?? "Unknown";
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-zinc-950 px-4 py-8 text-zinc-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_15%_20%,rgba(99,102,241,0.25),transparent_42%)]" />
@@ -867,11 +870,24 @@ function App() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {account.avatar_url ? (
-                          <img src={account.avatar_url} alt="Avatar" className={`h-9 w-9 rounded-full border ${getAvatarBorderClass(account)}`} />
-                        ) : (
-                          <div className={`h-9 w-9 rounded-full border ${getAvatarBorderClass(account)} bg-zinc-700`} />
-                        )}
+                        <div className="group relative inline-flex">
+                          {account.avatar_url ? (
+                            <img
+                              src={account.avatar_url}
+                              alt="Avatar"
+                              aria-label={getAvatarHoverTitle(account)}
+                              className={`h-9 w-9 rounded-full border ${getAvatarBorderClass(account)}`}
+                            />
+                          ) : (
+                            <div
+                              aria-label={getAvatarHoverTitle(account)}
+                              className={`h-9 w-9 rounded-full border ${getAvatarBorderClass(account)} bg-zinc-700`}
+                            />
+                          )}
+                          <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 max-w-[240px] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-zinc-700 bg-zinc-950/95 px-2 py-1 text-xs text-zinc-100 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
+                            {getAvatarHoverTitle(account)}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <button
