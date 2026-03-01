@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import kuroiLogo from "./assets/kuroi-logo.svg";
 
 type BanType = "None" | "VAC" | "GameBanned" | "VACLive";
@@ -101,6 +101,7 @@ function App() {
   const [usernameSearch, setUsernameSearch] = useState("");
   const [sortOption, setSortOption] = useState<SortOption>("mm_ready");
   const [showPublicAccounts, setShowPublicAccounts] = useState(false);
+  const [showOnlyPendingReviews, setShowOnlyPendingReviews] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [error, setError] = useState("");
   const [oidcVisible, setOidcVisible] = useState(oidcEnabledFromEnv);
@@ -131,6 +132,9 @@ function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
+  const [hasNewPendingReviewsPulse, setHasNewPendingReviewsPulse] = useState(false);
+  const lastOwnPendingReviewCountRef = useRef(0);
+  const pendingPulseTimeoutRef = useRef<number | null>(null);
 
   const [multiEditOpen, setMultiEditOpen] = useState(false);
   const [multiEdit, setMultiEdit] = useState<{
@@ -180,11 +184,15 @@ function App() {
   const isLoggedIn = useMemo(() => token.length > 0, [token]);
   const filteredAccounts = useMemo(() => {
     const query = usernameSearch.trim().toLowerCase();
+    const base = showOnlyPendingReviews
+      ? accounts.filter((account) => currentUserId === account.owner_id && (account.pending_review_count ?? 0) > 0)
+      : accounts;
+
     if (!query) {
-      return accounts;
+      return base;
     }
-    return accounts.filter((account) => account.username.toLowerCase().includes(query));
-  }, [accounts, usernameSearch]);
+    return base.filter((account) => account.username.toLowerCase().includes(query));
+  }, [accounts, usernameSearch, showOnlyPendingReviews, currentUserId]);
 
   const sortedAccounts = useMemo(() => {
     const items = [...filteredAccounts];
@@ -236,6 +244,39 @@ function App() {
     () => paginatedAccounts.filter((account) => currentUserId !== null && account.owner_id === currentUserId),
     [paginatedAccounts, currentUserId],
   );
+  const ownPendingReviewCount = useMemo(
+    () => accounts.filter((account) => currentUserId !== null && account.owner_id === currentUserId && (account.pending_review_count ?? 0) > 0).length,
+    [accounts, currentUserId],
+  );
+
+  useEffect(() => {
+    if (ownPendingReviewCount > lastOwnPendingReviewCountRef.current) {
+      setHasNewPendingReviewsPulse(true);
+      if (pendingPulseTimeoutRef.current) {
+        window.clearTimeout(pendingPulseTimeoutRef.current);
+      }
+      pendingPulseTimeoutRef.current = window.setTimeout(() => {
+        setHasNewPendingReviewsPulse(false);
+        pendingPulseTimeoutRef.current = null;
+      }, 6000);
+    } else if (ownPendingReviewCount === 0) {
+      setHasNewPendingReviewsPulse(false);
+      if (pendingPulseTimeoutRef.current) {
+        window.clearTimeout(pendingPulseTimeoutRef.current);
+        pendingPulseTimeoutRef.current = null;
+      }
+    }
+
+    lastOwnPendingReviewCountRef.current = ownPendingReviewCount;
+  }, [ownPendingReviewCount]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingPulseTimeoutRef.current) {
+        window.clearTimeout(pendingPulseTimeoutRef.current);
+      }
+    };
+  }, []);
   const selectedOwnAccounts = useMemo(
     () => ownAccounts.filter((account) => selectedAccountIds.has(account.id)),
     [ownAccounts, selectedAccountIds],
@@ -900,6 +941,19 @@ function App() {
                 <input type="checkbox" checked={showPublicAccounts} onChange={(event) => handlePublicToggle(event.target.checked)} />
                 Show public accounts
               </label>
+              <label className="relative flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 pr-7 text-sm text-zinc-100">
+                <input
+                  type="checkbox"
+                  checked={showOnlyPendingReviews}
+                  onChange={(event) => setShowOnlyPendingReviews(event.target.checked)}
+                />
+                Only pending reviews
+                {ownPendingReviewCount > 0 && (
+                  <span className={`absolute -right-1.5 -top-1.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full border border-sky-200/70 bg-sky-400 px-1 text-[10px] font-semibold leading-none text-zinc-950 shadow-[0_0_10px_rgba(56,189,248,0.7)] ${hasNewPendingReviewsPulse ? "animate-pulse" : ""}`}>
+                    {ownPendingReviewCount}
+                  </span>
+                )}
+              </label>
               <button className="ml-auto rounded-xl border border-rose-300/40 bg-rose-500/10 px-4 py-2 text-rose-200 hover:bg-rose-500/20" onClick={handleLogout}>
                 Logout
               </button>
@@ -951,10 +1005,10 @@ function App() {
             )}
 
             <div className="anime-panel overflow-x-auto rounded-3xl">
-              <table className="min-w-[1460px] w-full divide-y divide-zinc-700/60">
+              <table className="min-w-[1360px] w-full divide-y divide-zinc-700/60 text-[12px]">
                 <thead className="bg-zinc-900/70">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">
                       <input
                         type="checkbox"
                         checked={allOwnOnPageSelected}
@@ -962,24 +1016,24 @@ function App() {
                         onChange={toggleSelectAllOnPage}
                       />
                     </th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Avatar</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Username</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Email</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Steam ID64</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Password</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Ban Type</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Status</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">MM Ready</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Visibility</th>
-                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Review</th>
-                    <th className="px-4 py-3 pr-6 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Avatar</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Username</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Email</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Steam ID64</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Password</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Ban Type</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Status</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">VAC Live Left</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">MM Ready</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Visibility</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">Review</th>
+                    <th className="px-3 py-2 pr-3 text-left text-[11px] uppercase tracking-wider text-zinc-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-700/50">
                   {paginatedAccounts.map((account) => (
                     <tr key={account.id} className={getRowClassName(account)}>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         {currentUserId === account.owner_id ? (
                           <input
                             type="checkbox"
@@ -990,7 +1044,7 @@ function App() {
                           <span className="text-xs text-zinc-500">-</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <div className="group relative inline-flex">
                           {account.avatar_url ? (
                             <img
@@ -1010,37 +1064,37 @@ function App() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <button
                           type="button"
-                          className="cursor-copy text-left hover:text-fuchsia-200"
+                          className="block max-w-[150px] cursor-copy truncate text-left hover:text-fuchsia-200"
                           title="Click to copy username"
                           onClick={() => copyAccountField(account.username)}
                         >
                           {account.username}
                         </button>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <button
                           type="button"
-                          className="cursor-copy text-left hover:text-fuchsia-200"
+                          className="block max-w-[200px] cursor-copy truncate text-left hover:text-fuchsia-200"
                           title="Click to copy email"
                           onClick={() => copyAccountField(account.email)}
                         >
                           {account.email}
                         </button>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <button
                           type="button"
-                          className="cursor-copy text-left hover:text-fuchsia-200"
+                          className="block max-w-[170px] cursor-copy truncate text-left hover:text-fuchsia-200"
                           title="Click to copy Steam ID64"
                           onClick={() => copyAccountField(account.steam_id64 ?? "")}
                         >
                           {account.steam_id64 ?? "-"}
                         </button>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">
                         <button
                           type="button"
                           className="group cursor-copy text-left"
@@ -1050,25 +1104,30 @@ function App() {
                           <span className="inline-block blur-sm transition group-hover:blur-0">{account.password}</span>
                         </button>
                       </td>
-                      <td className="px-4 py-3">{account.ban_type}</td>
-                      <td className="px-4 py-3">{getDisplayStatus(account)}</td>
-                      <td className="px-4 py-3">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
-                      <td className="px-4 py-3">{account.matchmaking_ready ? "Yes" : "No"}</td>
-                      <td className="px-4 py-3">{account.is_public ? "Public" : "Private"}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-2">{account.ban_type}</td>
+                      <td className="px-3 py-2">{getDisplayStatus(account)}</td>
+                      <td className="px-3 py-2">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
+                      <td className="px-3 py-2">{account.matchmaking_ready ? "Yes" : "No"}</td>
+                      <td className="px-3 py-2">{account.is_public ? "Public" : "Private"}</td>
+                      <td className="px-3 py-2">
                         {currentUserId === account.owner_id && (account.pending_review_count ?? 0) > 0 ? (
                           <span className="inline-block h-2.5 w-2.5 rounded-full bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 pr-6">
+                      <td className="px-3 py-2 pr-3">
                         {currentUserId === account.owner_id ? (
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5">
                             <button
                               type="button"
-                              className="rounded-lg border border-sky-300/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-100 hover:bg-sky-500/20"
+                              className="inline-flex items-center rounded-lg border border-sky-300/40 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-100 hover:bg-sky-500/20"
                               onClick={() => openReviewModal(account)}
                             >
-                              Review{(account.pending_review_count ?? 0) > 0 ? ` (${account.pending_review_count})` : ""}
+                              Review
+                              {(account.pending_review_count ?? 0) > 0 && (
+                                <span className={`ml-1 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full border border-sky-200/70 bg-sky-400 px-1 text-[10px] font-semibold leading-none text-zinc-950 shadow-[0_0_10px_rgba(56,189,248,0.7)] ${hasNewPendingReviewsPulse ? "animate-pulse" : ""}`}>
+                                  {account.pending_review_count}
+                                </span>
+                              )}
                             </button>
                             <button type="button" className="anime-secondary-button px-2 py-1 text-xs" onClick={() => startEditAccount(account)}>
                               Edit
