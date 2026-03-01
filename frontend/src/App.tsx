@@ -713,7 +713,7 @@ function App() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_15%_20%,rgba(99,102,241,0.25),transparent_42%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:22px_22px]" />
 
-      <div className="relative mx-auto max-w-screen-2xl space-y-6">
+      <div className="relative mx-auto max-w-[1700px] space-y-6">
         <header className="anime-panel rounded-3xl p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-4">
