@@ -320,6 +320,7 @@ def create_account_record(
     username: str,
     email: str,
     password: str,
+    steam_id: str | None = None,
     matchmaking_ready: bool,
     is_public: bool,
     ban_type: BanType = BanType.NONE,
@@ -327,6 +328,9 @@ def create_account_record(
     vac_live_unit: str | None = None,
 ) -> SteamAccount:
     generated_steam_id = f"local_{secrets.token_hex(10)}"
+    provided_steam_id = (steam_id or "").strip()
+    should_use_generated_id = not provided_steam_id or provided_steam_id.lower() == "unknown"
+    resolved_steam_id = generated_steam_id if should_use_generated_id else provided_steam_id
     ban_status = BanStatus.CLEAN
     vac_live_expires_at = None
     if ban_type in {BanType.VAC, BanType.GAME_BANNED}:
@@ -339,7 +343,7 @@ def create_account_record(
 
     return SteamAccount(
         owner_id=actor_id,
-        steam_id64=generated_steam_id,
+        steam_id64=resolved_steam_id,
         username=username,
         password=encrypt_account_password(password, settings.app_secret),
         email=email,
@@ -373,6 +377,31 @@ def ensure_account_identity_unique(
         raise HTTPException(status_code=409, detail="Username already exists")
     if db.scalar(email_query) is not None:
         raise HTTPException(status_code=409, detail="Email already exists")
+
+
+def ensure_steam_id_unique(db: Session, *, steam_id: str) -> None:
+    normalized_steam_id = steam_id.strip()
+    if not normalized_steam_id:
+        return
+
+    existing_steam_id = db.scalar(select(SteamAccount.id).where(SteamAccount.steam_id64 == normalized_steam_id))
+    if existing_steam_id is not None:
+        raise HTTPException(status_code=409, detail="Steam ID already exists")
+
+
+def ensure_steam_id_unique_for_update(db: Session, *, steam_id: str, exclude_account_id: int) -> None:
+    normalized_steam_id = steam_id.strip()
+    if not normalized_steam_id:
+        return
+
+    existing_steam_id = db.scalar(
+        select(SteamAccount.id).where(
+            SteamAccount.steam_id64 == normalized_steam_id,
+            SteamAccount.id != exclude_account_id,
+        )
+    )
+    if existing_steam_id is not None:
+        raise HTTPException(status_code=409, detail="Steam ID already exists")
 
 
 @app.get("/health")
@@ -677,12 +706,15 @@ async def create_account(
     db: Session = Depends(get_db),
 ):
     ensure_account_identity_unique(db, username=payload.username, email=payload.email)
+    if payload.steam_id and payload.steam_id.strip().lower() != "unknown":
+        ensure_steam_id_unique(db, steam_id=payload.steam_id)
 
     account = create_account_record(
         actor_id=actor.id,
         username=payload.username,
         email=payload.email,
         password=payload.password,
+        steam_id=payload.steam_id,
         matchmaking_ready=payload.matchmaking_ready,
         is_public=payload.is_public,
         ban_type=payload.ban_type,
@@ -705,6 +737,7 @@ def mass_import_accounts(
     created = 0
     seen_usernames: set[str] = set()
     seen_emails: set[str] = set()
+    seen_steam_ids: set[str] = set()
 
     for line_number, raw_line in enumerate(payload.content.splitlines(), start=1):
         line = raw_line.strip()
@@ -712,17 +745,29 @@ def mass_import_accounts(
             continue
 
         parts = [part.strip() for part in line.split("|")]
-        if len(parts) != 3:
-            errors.append(MassImportError(line=line_number, message="Invalid format, expected: email | username | password", raw=raw_line))
+        if len(parts) != 4:
+            errors.append(
+                MassImportError(
+                    line=line_number,
+                    message="Invalid format, expected: email | username | password | steamid64",
+                    raw=raw_line,
+                )
+            )
             continue
 
-        email_with_optional_timestamp, username, password = parts
+        email_with_optional_timestamp, username, password, steam_id = parts
         email = email_with_optional_timestamp
         if ": " in email_with_optional_timestamp:
             email = email_with_optional_timestamp.split(": ", 1)[1].strip()
 
-        if not email or not username or not password:
-            errors.append(MassImportError(line=line_number, message="Email, username and password are required", raw=raw_line))
+        if not email or not username or not password or not steam_id:
+            errors.append(
+                MassImportError(
+                    line=line_number,
+                    message="Email, username, password and steamid64 are required",
+                    raw=raw_line,
+                )
+            )
             continue
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             errors.append(MassImportError(line=line_number, message="Invalid email format", raw=raw_line))
@@ -735,6 +780,9 @@ def mass_import_accounts(
             continue
         if normalized_email in seen_emails:
             errors.append(MassImportError(line=line_number, message="Email is duplicated in import", raw=raw_line))
+            continue
+        if steam_id in seen_steam_ids:
+            errors.append(MassImportError(line=line_number, message="Steam ID is duplicated in import", raw=raw_line))
             continue
 
         existing_username = db.scalar(
@@ -751,12 +799,18 @@ def mass_import_accounts(
             errors.append(MassImportError(line=line_number, message="Email already exists", raw=raw_line))
             continue
 
+        existing_steam_id = db.scalar(select(SteamAccount.id).where(SteamAccount.steam_id64 == steam_id))
+        if existing_steam_id is not None:
+            errors.append(MassImportError(line=line_number, message="Steam ID already exists", raw=raw_line))
+            continue
+
         try:
             account = create_account_record(
                 actor_id=actor.id,
                 username=username,
                 email=email,
                 password=password,
+                steam_id=steam_id,
                 matchmaking_ready=False,
                 is_public=payload.is_public,
                 ban_type=BanType.NONE,
@@ -766,6 +820,7 @@ def mass_import_accounts(
             created += 1
             seen_usernames.add(normalized_username)
             seen_emails.add(normalized_email)
+            seen_steam_ids.add(steam_id)
         except Exception as exc:
             db.rollback()
             errors.append(MassImportError(line=line_number, message=f"Could not create account: {exc}", raw=raw_line))
@@ -811,10 +866,14 @@ def update_account(
         email=payload.email,
         exclude_account_id=account.id,
     )
+    if payload.steam_id:
+        ensure_steam_id_unique_for_update(db, steam_id=payload.steam_id, exclude_account_id=account.id)
 
     account.username = payload.username
     account.password = encrypt_account_password(payload.password, settings.app_secret)
     account.email = payload.email
+    if payload.steam_id:
+        account.steam_id64 = payload.steam_id.strip()
     account.matchmaking_ready = payload.matchmaking_ready
     account.is_public = payload.is_public
     account.ban_type = payload.ban_type.value

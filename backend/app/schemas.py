@@ -60,6 +60,7 @@ class SteamAccountCreate(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=255)
     email: EmailStr
+    steam_id: str | None = Field(default=None, min_length=1, max_length=64)
     ban_type: BanType = BanType.NONE
     vac_live_value: int | None = Field(default=None, ge=1, le=365)
     vac_live_unit: Literal["hours", "days"] | None = None
@@ -81,6 +82,7 @@ class SteamAccountUpdate(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=255)
     email: EmailStr
+    steam_id: str | None = Field(default=None, min_length=1, max_length=64)
     ban_type: BanType = BanType.NONE
     vac_live_value: int | None = Field(default=None, ge=1, le=365)
     vac_live_unit: Literal["hours", "days"] | None = None

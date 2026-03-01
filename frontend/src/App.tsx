@@ -9,6 +9,7 @@ type Account = {
   username: string;
   password: string;
   email: string;
+  steam_id64?: string | null;
   ban_type: BanType;
   vac_live_remaining?: string | null;
   matchmaking_ready: boolean;
@@ -119,6 +120,7 @@ function App() {
     username: "",
     password: "",
     email: "",
+    steam_id: "",
     ban_type: "None" as BanType,
     vac_live_value: "20",
     vac_live_unit: "hours" as "hours" | "days",
@@ -130,6 +132,7 @@ function App() {
     username: "",
     password: "",
     email: "",
+    steam_id: "",
     ban_type: "None" as BanType,
     vac_live_value: "20",
     vac_live_unit: "hours" as "hours" | "days",
@@ -366,6 +369,10 @@ function App() {
         matchmaking_ready: newAccount.matchmaking_ready,
         is_public: newAccount.is_public,
       };
+      const normalizedSteamId = newAccount.steam_id.trim();
+      if (normalizedSteamId) {
+        payload.steam_id = normalizedSteamId;
+      }
 
       if (newAccount.ban_type === "VACLive") {
         payload.vac_live_value = Number(newAccount.vac_live_value);
@@ -381,6 +388,7 @@ function App() {
         username: "",
         password: "",
         email: "",
+        steam_id: "",
         ban_type: "None",
         vac_live_value: "20",
         vac_live_unit: "hours",
@@ -455,6 +463,7 @@ function App() {
       username: account.username,
       password: account.password,
       email: account.email,
+      steam_id: account.steam_id64 ?? "",
       ban_type: account.ban_type,
       vac_live_value: "20",
       vac_live_unit: "hours",
@@ -479,6 +488,10 @@ function App() {
         matchmaking_ready: editAccount.matchmaking_ready,
         is_public: editAccount.is_public,
       };
+      const normalizedSteamId = editAccount.steam_id.trim();
+      if (normalizedSteamId) {
+        payload.steam_id = normalizedSteamId;
+      }
       if (editAccount.ban_type === "VACLive") {
         payload.vac_live_value = Number(editAccount.vac_live_value);
         payload.vac_live_unit = editAccount.vac_live_unit;
@@ -551,6 +564,10 @@ function App() {
             matchmaking_ready: multiEdit.apply_mm_ready ? multiEdit.matchmaking_ready : account.matchmaking_ready,
             is_public: multiEdit.apply_is_public ? multiEdit.is_public : account.is_public,
           };
+          const steamId = account.steam_id64?.trim();
+          if (steamId) {
+            payload.steam_id = steamId;
+          }
           const effectiveBanType = multiEdit.apply_ban_type ? multiEdit.ban_type : account.ban_type;
           if (effectiveBanType === "VACLive" && multiEdit.apply_ban_type) {
             payload.vac_live_value = Number(multiEdit.vac_live_value);
@@ -588,7 +605,7 @@ function App() {
       return;
     }
 
-    const header = ["id", "username", "email", "password", "ban_type", "vac_live_remaining", "matchmaking_ready", "is_public", "created_at"];
+    const header = ["id", "username", "email", "steam_id64", "password", "ban_type", "vac_live_remaining", "matchmaking_ready", "is_public", "created_at"];
     const csvLines = [
       header.join(","),
       ...rows.map((account) =>
@@ -596,6 +613,7 @@ function App() {
           account.id,
           account.username,
           account.email,
+          account.steam_id64 ?? "",
           account.password,
           account.ban_type,
           account.vac_live_remaining ?? "",
@@ -740,6 +758,7 @@ function App() {
                 <input className="anime-input" placeholder="Username" value={editAccount.username} onChange={(event) => setEditAccount({ ...editAccount, username: event.target.value })} />
                 <input className="anime-input" placeholder="Email" value={editAccount.email} onChange={(event) => setEditAccount({ ...editAccount, email: event.target.value })} />
                 <input type="password" className="anime-input" placeholder="Password" value={editAccount.password} onChange={(event) => setEditAccount({ ...editAccount, password: event.target.value })} />
+                <input className="anime-input" placeholder="Steam ID64" value={editAccount.steam_id} onChange={(event) => setEditAccount({ ...editAccount, steam_id: event.target.value })} />
                 <select className="anime-input" value={editAccount.ban_type} onChange={(event) => setEditAccount({ ...editAccount, ban_type: event.target.value as BanType })}>
                   <option value="None">Not banned</option>
                   <option value="VAC">VAC</option>
@@ -794,6 +813,7 @@ function App() {
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Avatar</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Username</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Email</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Steam ID64</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Password</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Ban Type</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
@@ -837,6 +857,16 @@ function App() {
                           onClick={() => copyAccountField(account.email)}
                         >
                           {account.email}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          className="cursor-copy text-left hover:text-fuchsia-200"
+                          title="Click to copy Steam ID64"
+                          onClick={() => copyAccountField(account.steam_id64 ?? "")}
+                        >
+                          {account.steam_id64 ?? "-"}
                         </button>
                       </td>
                       <td className="px-4 py-3">
@@ -943,6 +973,7 @@ function App() {
               <input className="anime-input" placeholder="Username" value={newAccount.username} onChange={(event) => setNewAccount({ ...newAccount, username: event.target.value })} />
               <input className="anime-input" placeholder="Email" value={newAccount.email} onChange={(event) => setNewAccount({ ...newAccount, email: event.target.value })} />
               <input type="password" className="anime-input" placeholder="Password" value={newAccount.password} onChange={(event) => setNewAccount({ ...newAccount, password: event.target.value })} />
+              <input className="anime-input" placeholder="Steam ID64" value={newAccount.steam_id} onChange={(event) => setNewAccount({ ...newAccount, steam_id: event.target.value })} />
 
               <select className="anime-input" value={newAccount.ban_type} onChange={(event) => setNewAccount({ ...newAccount, ban_type: event.target.value as BanType })}>
                 <option value="None">Not banned</option>
@@ -999,6 +1030,7 @@ function App() {
     "username": "demo_user",
     "password": "demo_pass",
     "email": "demo@example.com",
+    "steam_id": "76561198000000000",
     "ban_type": "None",
     "is_public": false
   }'`}
@@ -1008,10 +1040,10 @@ function App() {
             </form>
 
             <form onSubmit={handleMassImport} className="anime-panel rounded-3xl p-4 space-y-3">
-              <p className="text-sm text-zinc-300">Mass import format: <span className="font-mono">timestamp: email | username | password</span></p>
+              <p className="text-sm text-zinc-300">Mass import format: <span className="font-mono">timestamp: email | username | password | steamid64</span></p>
               <textarea
                 className="anime-input min-h-40 w-full"
-                placeholder="2025-01-01 10:00:00: mail@example.com | account_name | secret_password"
+                placeholder="2025-01-01 10:00:00: mail@example.com | account_name | secret_password | 76561198000000000"
                 value={massImportContent}
                 onChange={(event) => setMassImportContent(event.target.value)}
               />
