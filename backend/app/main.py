@@ -447,17 +447,14 @@ def create_account_record(
     username: str,
     email: str,
     password: str,
-    steam_id: str | None = None,
+    steam_id: str,
     matchmaking_ready: bool,
     is_public: bool,
     ban_type: BanType = BanType.NONE,
     vac_live_value: int | None = None,
     vac_live_unit: str | None = None,
 ) -> SteamAccount:
-    generated_steam_id = f"local_{secrets.token_hex(10)}"
-    provided_steam_id = (steam_id or "").strip()
-    should_use_generated_id = not provided_steam_id or provided_steam_id.lower() == "unknown"
-    resolved_steam_id = generated_steam_id if should_use_generated_id else provided_steam_id
+    resolved_steam_id = steam_id.strip()
     ban_status = BanStatus.CLEAN
     vac_live_expires_at = None
     if ban_type in {BanType.VAC, BanType.GAME_BANNED}:
@@ -835,8 +832,7 @@ async def create_account(
     db: Session = Depends(get_db),
 ):
     ensure_account_identity_unique(db, username=payload.username, email=payload.email)
-    if payload.steam_id and payload.steam_id.strip().lower() != "unknown":
-        ensure_steam_id_unique(db, steam_id=payload.steam_id)
+    ensure_steam_id_unique(db, steam_id=payload.steam_id)
 
     account = create_account_record(
         actor_id=actor.id,
@@ -900,6 +896,9 @@ def mass_import_accounts(
             continue
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
             errors.append(MassImportError(line=line_number, message="Invalid email format", raw=raw_line))
+            continue
+        if not re.match(r"^\d{17}$", steam_id):
+            errors.append(MassImportError(line=line_number, message="Invalid steamid64 format", raw=raw_line))
             continue
 
         normalized_username = username.lower()

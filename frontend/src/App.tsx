@@ -827,8 +827,8 @@ function App() {
               </form>
             )}
 
-            <div className="anime-panel overflow-hidden rounded-3xl">
-              <table className="min-w-full divide-y divide-zinc-700/60">
+            <div className="anime-panel overflow-x-auto rounded-3xl">
+              <table className="min-w-[1550px] w-full divide-y divide-zinc-700/60">
                 <thead className="bg-zinc-900/70">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">
