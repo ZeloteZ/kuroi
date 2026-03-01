@@ -13,6 +13,9 @@ type Account = {
   steam_profile_name?: string | null;
   online_status?: string | null;
   game_status?: string | null;
+  requires_review?: boolean;
+  suggested_changes?: string[];
+  suggested_ban_type?: BanType | null;
   ban_type: BanType;
   vac_live_remaining?: string | null;
   matchmaking_ready: boolean;
@@ -91,6 +94,7 @@ function App() {
 
   const [generatedApiKey, setGeneratedApiKey] = useState("");
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
+  const [applyingSuggestionAccountId, setApplyingSuggestionAccountId] = useState<number | null>(null);
   const [massImportContent, setMassImportContent] = useState("");
   const [massImportPublic, setMassImportPublic] = useState(false);
   const [massImportResult, setMassImportResult] = useState<MassImportResponse | null>(null);
@@ -538,6 +542,39 @@ function App() {
     }
   };
 
+  const handleApplySuggestedBanType = async (account: Account) => {
+    if (!account.suggested_ban_type || account.suggested_ban_type === account.ban_type) {
+      return;
+    }
+
+    setError("");
+    setApplyingSuggestionAccountId(account.id);
+    try {
+      const payload: Record<string, unknown> = {
+        username: account.username,
+        password: account.password,
+        email: account.email,
+        ban_type: account.suggested_ban_type,
+        matchmaking_ready: account.matchmaking_ready,
+        is_public: account.is_public,
+      };
+      const steamId = account.steam_id64?.trim();
+      if (steamId) {
+        payload.steam_id = steamId;
+      }
+
+      await apiFetch<Account>(`/accounts/${account.id}`, token, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      await loadAccounts();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not apply suggestion");
+    } finally {
+      setApplyingSuggestionAccountId(null);
+    }
+  };
+
   const openMultiEdit = () => {
     setMultiEdit({
       ban_type: "None",
@@ -711,6 +748,15 @@ function App() {
 
   const getAvatarHoverTitle = (account: Account) => account.steam_profile_name ?? "Unknown";
 
+  const getReviewSuggestions = (account: Account) => account.suggested_changes ?? [];
+
+  const getRowClassName = (account: Account) => {
+    if (account.requires_review && currentUserId === account.owner_id) {
+      return "bg-amber-500/5 ring-1 ring-inset ring-amber-400/30 hover:bg-amber-500/10";
+    }
+    return "hover:bg-zinc-800/35";
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-zinc-950 px-4 py-8 text-zinc-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,114,182,0.18),transparent_45%),radial-gradient(circle_at_15%_20%,rgba(99,102,241,0.25),transparent_42%)]" />
@@ -852,12 +898,13 @@ function App() {
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">VAC Live Left</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">MM Ready</th>
                     <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Visibility</th>
+                    <th className="px-4 py-3 text-left text-xs uppercase tracking-wider text-zinc-300">Review</th>
                     <th className="px-4 py-3 pr-6 text-left text-xs uppercase tracking-wider text-zinc-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-700/50">
                   {paginatedAccounts.map((account) => (
-                    <tr key={account.id} className="hover:bg-zinc-800/35">
+                    <tr key={account.id} className={getRowClassName(account)}>
                       <td className="px-4 py-3">
                         {currentUserId === account.owner_id ? (
                           <input
@@ -884,7 +931,7 @@ function App() {
                               className={`h-9 w-9 rounded-full border ${getAvatarBorderClass(account)} bg-zinc-700`}
                             />
                           )}
-                          <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 max-w-[240px] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-zinc-700 bg-zinc-950/95 px-2 py-1 text-xs text-zinc-100 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
+                          <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 max-w-[240px] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-zinc-700 bg-zinc-950/95 px-2 py-1 text-xs text-zinc-100 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
                             {getAvatarHoverTitle(account)}
                           </div>
                         </div>
@@ -934,6 +981,39 @@ function App() {
                       <td className="px-4 py-3">{account.ban_type === "VACLive" ? account.vac_live_remaining ?? "Expired" : "-"}</td>
                       <td className="px-4 py-3">{account.matchmaking_ready ? "Yes" : "No"}</td>
                       <td className="px-4 py-3">{account.is_public ? "Public" : "Private"}</td>
+                      <td className="px-4 py-3">
+                        {account.requires_review ? (
+                          <div className="space-y-2">
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${currentUserId === account.owner_id ? "border-amber-300/60 bg-amber-500/20 text-amber-100" : "border-zinc-600 bg-zinc-800/70 text-zinc-200"}`}>
+                              {currentUserId === account.owner_id ? "Check required" : "Owner check pending"}
+                            </span>
+                            <ul className="max-w-[280px] space-y-1">
+                              {getReviewSuggestions(account).slice(0, 2).map((suggestion, index) => (
+                                <li key={`${account.id}-suggestion-${index}`} className="rounded-md border border-amber-300/20 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100">
+                                  {suggestion}
+                                </li>
+                              ))}
+                              {getReviewSuggestions(account).length > 2 && (
+                                <li className="text-[11px] text-zinc-300">+{getReviewSuggestions(account).length - 2} more</li>
+                              )}
+                            </ul>
+                            {currentUserId === account.owner_id && account.suggested_ban_type && account.suggested_ban_type !== account.ban_type && (
+                              <button
+                                type="button"
+                                className="rounded-md border border-fuchsia-300/40 bg-fuchsia-500/15 px-2 py-1 text-[11px] font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/25 disabled:opacity-50"
+                                disabled={applyingSuggestionAccountId === account.id}
+                                onClick={() => handleApplySuggestedBanType(account)}
+                              >
+                                {applyingSuggestionAccountId === account.id ? "Applying..." : `Apply ${account.suggested_ban_type}`}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="inline-flex rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-200">
+                            No review needed
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 pr-6">
                         {currentUserId === account.owner_id ? (
                           <div className="flex gap-2">

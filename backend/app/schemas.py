@@ -117,6 +117,9 @@ class SteamAccountOut(BaseModel):
     steam_profile_name: str | None = None
     online_status: str | None = None
     game_status: str | None = None
+    requires_review: bool = False
+    suggested_changes: list[str] = []
+    suggested_ban_type: BanType | None = None
     created_at: datetime
 
     class Config:

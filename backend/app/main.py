@@ -74,6 +74,7 @@ class Settings(BaseSettings):
 
     steam_api_key: str | None = None
     steam_status_refresh_seconds: int = 30
+    steam_id_legacy_cleanup_enabled: bool = False
 
 
 @lru_cache
@@ -110,8 +111,6 @@ def ensure_schema_extensions() -> None:
     inspector = inspect(engine)
     columns = inspector.get_columns("steam_accounts")
     column_names = {column["name"] for column in columns}
-    steam_id64_column = next((column for column in columns if column.get("name") == "steam_id64"), None)
-    steam_id64_is_nullable = bool(steam_id64_column and steam_id64_column.get("nullable", False))
 
     with engine.begin() as connection:
         if "ban_type" not in column_names:
@@ -126,13 +125,18 @@ def ensure_schema_extensions() -> None:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN game_status VARCHAR(255)")
         if "steam_profile_name" not in column_names:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_profile_name VARCHAR(255)")
+        if "steam_vac_bans" not in column_names:
+            connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_vac_bans INTEGER")
+        if "steam_game_bans" not in column_names:
+            connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_game_bans INTEGER")
+        if "steam_days_since_last_ban" not in column_names:
+            connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_days_since_last_ban INTEGER")
+        if "steam_economy_ban" not in column_names:
+            connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_economy_ban VARCHAR(64)")
+        if "steam_checked_at" not in column_names:
+            connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_checked_at TIMESTAMP")
 
-        if steam_id64_is_nullable:
-            connection.execute(
-                text("UPDATE steam_accounts SET steam_id64 = NULL WHERE steam_id64 LIKE :pattern"),
-                {"pattern": "local_%"},
-            )
-        else:
+        if settings.steam_id_legacy_cleanup_enabled:
             connection.execute(
                 text(
                     "UPDATE steam_accounts "
@@ -322,6 +326,7 @@ def format_remaining_time(expires_at: datetime | None) -> str | None:
 
 
 def serialize_account(account: SteamAccount) -> SteamAccountOut:
+    suggestions, suggested_ban_type = build_account_suggestions(account)
     payload = {
         "id": account.id,
         "owner_id": account.owner_id,
@@ -339,9 +344,38 @@ def serialize_account(account: SteamAccount) -> SteamAccountOut:
         "steam_profile_name": account.steam_profile_name,
         "online_status": account.online_status,
         "game_status": account.game_status,
+        "requires_review": len(suggestions) > 0,
+        "suggested_changes": suggestions,
+        "suggested_ban_type": suggested_ban_type,
         "created_at": account.created_at,
     }
     return SteamAccountOut.model_validate(payload)
+
+
+def build_account_suggestions(account: SteamAccount) -> tuple[list[str], BanType | None]:
+    suggestions: list[str] = []
+    suggested_ban_type: BanType | None = None
+    vac_bans = account.steam_vac_bans or 0
+    game_bans = account.steam_game_bans or 0
+
+    if vac_bans > 0 and account.ban_type != BanType.VAC.value:
+        suggestions.append(f"Steam reports {vac_bans} VAC ban(s) — review ban type (VAC suggested)")
+        suggested_ban_type = BanType.VAC
+    elif game_bans > 0 and account.ban_type not in {BanType.VAC.value, BanType.GAME_BANNED.value}:
+        suggestions.append(f"Steam reports {game_bans} game ban(s) — review ban type (GameBanned suggested)")
+        suggested_ban_type = BanType.GAME_BANNED
+
+    if account.matchmaking_ready and not account.steam_id64:
+        suggestions.append("Matchmaking-ready account has no Steam ID — set steam_id64 for live checks")
+
+    if account.matchmaking_ready and account.steam_id64 and account.online_status in {None, "Unknown"}:
+        suggestions.append("Steam status unavailable — verify Steam ID or profile visibility")
+
+    if vac_bans == 0 and game_bans == 0 and account.ban_type in {BanType.VAC.value, BanType.GAME_BANNED.value}:
+        suggestions.append("Steam currently reports no VAC/Game bans — re-check local ban type")
+        suggested_ban_type = BanType.NONE
+
+    return suggestions, suggested_ban_type
 
 
 PERSONA_STATE_LABELS = {
@@ -402,6 +436,15 @@ async def refresh_matchmaking_accounts_steam_presence() -> None:
                 response.raise_for_status()
                 players = response.json().get("response", {}).get("players", [])
 
+                bans_url = (
+                    "https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/"
+                    f"?key={settings.steam_api_key}&steamids={','.join(id_chunk)}"
+                )
+                bans_response = await client.get(bans_url)
+                bans_response.raise_for_status()
+                bans_players = bans_response.json().get("players", [])
+                bans_by_steam_id = {str(player.get("SteamId", "")).strip(): player for player in bans_players}
+
                 seen_ids: set[str] = set()
                 for player in players:
                     steam_id = str(player.get("steamid", "")).strip()
@@ -418,6 +461,13 @@ async def refresh_matchmaking_accounts_steam_presence() -> None:
                     persona_name = player.get("personaname")
                     account.steam_profile_name = str(persona_name).strip() if persona_name else None
                     account.online_status, account.game_status = _resolve_steam_presence(player)
+                    ban_data = bans_by_steam_id.get(steam_id, {})
+                    account.steam_vac_bans = int(ban_data.get("NumberOfVACBans", 0) or 0)
+                    account.steam_game_bans = int(ban_data.get("NumberOfGameBans", 0) or 0)
+                    account.steam_days_since_last_ban = int(ban_data.get("DaysSinceLastBan", 0) or 0)
+                    economy_ban = ban_data.get("EconomyBan")
+                    account.steam_economy_ban = str(economy_ban) if economy_ban else None
+                    account.steam_checked_at = datetime.now(timezone.utc)
 
                 missing_ids = set(id_chunk) - seen_ids
                 for missing_id in missing_ids:
@@ -427,6 +477,7 @@ async def refresh_matchmaking_accounts_steam_presence() -> None:
                     account.steam_profile_name = None
                     account.online_status = "Unknown"
                     account.game_status = None
+                    account.steam_checked_at = datetime.now(timezone.utc)
 
         db.commit()
     finally:
@@ -504,6 +555,11 @@ def create_account_record(
         steam_profile_name=None,
         online_status=None,
         game_status=None,
+        steam_vac_bans=None,
+        steam_game_bans=None,
+        steam_days_since_last_ban=None,
+        steam_economy_ban=None,
+        steam_checked_at=None,
     )
 
 

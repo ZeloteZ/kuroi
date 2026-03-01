@@ -81,6 +81,11 @@ class SteamAccount(Base):
     steam_profile_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     online_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     game_status: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    steam_vac_bans: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    steam_game_bans: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    steam_days_since_last_ban: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    steam_economy_ban: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    steam_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
