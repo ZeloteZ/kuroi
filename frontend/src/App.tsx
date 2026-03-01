@@ -62,6 +62,8 @@ type AccountSuggestion = {
   suggested_by_id: number;
   suggested_by_username: string;
   suggested_ban_type?: BanType | null;
+  suggested_vac_live_value?: number | null;
+  suggested_vac_live_unit?: "hours" | "days" | null;
   suggested_matchmaking_ready?: boolean | null;
   suggested_is_public?: boolean | null;
   note?: string | null;
@@ -113,15 +115,20 @@ function App() {
   const [reviewAccount, setReviewAccount] = useState<Account | null>(null);
   const [reviewSuggestions, setReviewSuggestions] = useState<AccountSuggestion[]>([]);
   const [isLoadingReviewSuggestions, setIsLoadingReviewSuggestions] = useState(false);
+  const [reviewButtonHints, setReviewButtonHints] = useState<Record<number, string>>({});
   const [isSubmittingSuggestion, setIsSubmittingSuggestion] = useState(false);
   const [resolvingSuggestionId, setResolvingSuggestionId] = useState<number | null>(null);
   const [suggestionForm, setSuggestionForm] = useState<{
     suggested_ban_type: "" | BanType;
+    suggested_vac_live_value: string;
+    suggested_vac_live_unit: "hours" | "days";
     suggested_matchmaking_ready: "" | "true" | "false";
     suggested_is_public: "" | "true" | "false";
     note: string;
   }>({
     suggested_ban_type: "",
+    suggested_vac_live_value: "20",
+    suggested_vac_live_unit: "hours",
     suggested_matchmaking_ready: "",
     suggested_is_public: "",
     note: "",
@@ -617,6 +624,8 @@ function App() {
     setSuggestAccount(account);
     setSuggestionForm({
       suggested_ban_type: "",
+      suggested_vac_live_value: "20",
+      suggested_vac_live_unit: "hours",
       suggested_matchmaking_ready: "",
       suggested_is_public: "",
       note: "",
@@ -635,6 +644,10 @@ function App() {
       const payload: Record<string, unknown> = {};
       if (suggestionForm.suggested_ban_type) {
         payload.suggested_ban_type = suggestionForm.suggested_ban_type;
+      }
+      if (suggestionForm.suggested_ban_type === "VACLive") {
+        payload.suggested_vac_live_value = Number(suggestionForm.suggested_vac_live_value);
+        payload.suggested_vac_live_unit = suggestionForm.suggested_vac_live_unit;
       }
       if (suggestionForm.suggested_matchmaking_ready) {
         payload.suggested_matchmaking_ready = suggestionForm.suggested_matchmaking_ready === "true";
@@ -672,6 +685,37 @@ function App() {
       setReviewSuggestions([]);
     } finally {
       setIsLoadingReviewSuggestions(false);
+    }
+  };
+
+  const prefetchReviewHint = async (account: Account) => {
+    if (reviewButtonHints[account.id] || (account.pending_review_count ?? 0) === 0) {
+      return;
+    }
+
+    try {
+      const items = await apiFetch<AccountSuggestion[]>(`/accounts/${account.id}/suggestions`, token);
+      if (!items.length) {
+        setReviewButtonHints((previous) => ({ ...previous, [account.id]: "No pending suggestions" }));
+        return;
+      }
+
+      const vacLiveSuggestion = items.find(
+        (item) => item.suggested_ban_type === "VACLive" && item.suggested_vac_live_value && item.suggested_vac_live_unit,
+      );
+      if (vacLiveSuggestion && vacLiveSuggestion.suggested_vac_live_value && vacLiveSuggestion.suggested_vac_live_unit) {
+        setReviewButtonHints((previous) => ({
+          ...previous,
+          [account.id]: `Pending: VACLive ${vacLiveSuggestion.suggested_vac_live_value} ${vacLiveSuggestion.suggested_vac_live_unit}`,
+        }));
+        return;
+      }
+
+      const firstSuggestion = items[0];
+      const banHint = firstSuggestion.suggested_ban_type ? `Ban ${firstSuggestion.suggested_ban_type}` : "Pending suggestion";
+      setReviewButtonHints((previous) => ({ ...previous, [account.id]: banHint }));
+    } catch {
+      setReviewButtonHints((previous) => ({ ...previous, [account.id]: "Open to review pending suggestions" }));
     }
   };
 
@@ -839,16 +883,16 @@ function App() {
 
   const getAvatarBorderClass = (account: Account) => {
     if (account.ban_type !== "None") {
-      return "border-rose-500/90 shadow-[0_0_0_1px_rgba(244,63,94,0.35)]";
+      return "border-rose-500/90 shadow-[0_0_10px_rgba(244,63,94,0.45)]";
     }
 
     if (account.online_status === "InGame") {
-      return "border-emerald-400/90 shadow-[0_0_0_1px_rgba(52,211,153,0.35)]";
+      return "border-emerald-400/90 shadow-[0_0_10px_rgba(52,211,153,0.45)]";
     }
 
     const onlineStates = new Set(["Online", "Busy", "Away", "Snooze", "LookingToTrade", "LookingToPlay"]);
     if (onlineStates.has(account.online_status ?? "")) {
-      return "border-sky-400/90 shadow-[0_0_0_1px_rgba(56,189,248,0.35)]";
+      return "border-sky-400/90 shadow-[0_0_10px_rgba(56,189,248,0.45)]";
     }
 
     return "border-zinc-600";
@@ -1120,6 +1164,10 @@ function App() {
                             <button
                               type="button"
                               className="inline-flex items-center rounded-lg border border-sky-300/40 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-100 hover:bg-sky-500/20"
+                              title={reviewButtonHints[account.id] ?? ((account.pending_review_count ?? 0) > 0 ? `Pending suggestions: ${account.pending_review_count}` : "No pending suggestions")}
+                              onMouseEnter={() => {
+                                void prefetchReviewHint(account);
+                              }}
                               onClick={() => openReviewModal(account)}
                             >
                               Review
@@ -1477,7 +1525,28 @@ function App() {
                 <option value="None">Ban Type: None</option>
                 <option value="VAC">Ban Type: VAC</option>
                 <option value="GameBanned">Ban Type: GameBanned</option>
+                <option value="VACLive">Ban Type: VAC Live</option>
               </select>
+              {suggestionForm.suggested_ban_type === "VACLive" && (
+                <div className="grid gap-2 md:grid-cols-[1fr_120px]">
+                  <input
+                    className="anime-input"
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={suggestionForm.suggested_vac_live_value}
+                    onChange={(event) => setSuggestionForm({ ...suggestionForm, suggested_vac_live_value: event.target.value })}
+                  />
+                  <select
+                    className="anime-input"
+                    value={suggestionForm.suggested_vac_live_unit}
+                    onChange={(event) => setSuggestionForm({ ...suggestionForm, suggested_vac_live_unit: event.target.value as "hours" | "days" })}
+                  >
+                    <option value="hours">hours</option>
+                    <option value="days">days</option>
+                  </select>
+                </div>
+              )}
               <select
                 className="anime-input w-full"
                 value={suggestionForm.suggested_matchmaking_ready}
@@ -1529,6 +1598,9 @@ function App() {
                     <p className="text-xs text-zinc-400">From {suggestion.suggested_by_username}</p>
                     <div className="flex flex-wrap gap-2 text-xs">
                       {suggestion.suggested_ban_type && <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-100">Ban: {suggestion.suggested_ban_type}</span>}
+                      {suggestion.suggested_ban_type === "VACLive" && suggestion.suggested_vac_live_value && suggestion.suggested_vac_live_unit && (
+                        <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-100">Duration: {suggestion.suggested_vac_live_value} {suggestion.suggested_vac_live_unit}</span>
+                      )}
                       {suggestion.suggested_matchmaking_ready !== null && suggestion.suggested_matchmaking_ready !== undefined && <span className="rounded-full border border-sky-300/40 bg-sky-500/10 px-2 py-0.5 text-sky-100">MM Ready: {suggestion.suggested_matchmaking_ready ? "Yes" : "No"}</span>}
                       {suggestion.suggested_is_public !== null && suggestion.suggested_is_public !== undefined && <span className="rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-100">Visibility: {suggestion.suggested_is_public ? "Public" : "Private"}</span>}
                     </div>

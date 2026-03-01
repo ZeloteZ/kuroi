@@ -139,6 +139,14 @@ def ensure_schema_extensions() -> None:
         if "steam_checked_at" not in column_names:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN steam_checked_at TIMESTAMP")
 
+        table_names = set(inspector.get_table_names())
+        if "account_suggestions" in table_names:
+            suggestion_columns = {column["name"] for column in inspector.get_columns("account_suggestions")}
+            if "suggested_vac_live_value" not in suggestion_columns:
+                connection.exec_driver_sql("ALTER TABLE account_suggestions ADD COLUMN suggested_vac_live_value INTEGER")
+            if "suggested_vac_live_unit" not in suggestion_columns:
+                connection.exec_driver_sql("ALTER TABLE account_suggestions ADD COLUMN suggested_vac_live_unit VARCHAR(8)")
+
         if settings.steam_id_legacy_cleanup_enabled:
             connection.execute(
                 text(
@@ -367,6 +375,8 @@ def serialize_suggestion(suggestion: AccountSuggestion, suggested_by_username: s
         suggested_by_id=suggestion.suggested_by_id,
         suggested_by_username=suggested_by_username,
         suggested_ban_type=suggested_ban_type,
+        suggested_vac_live_value=suggestion.suggested_vac_live_value,
+        suggested_vac_live_unit=suggestion.suggested_vac_live_unit if suggestion.suggested_vac_live_unit in {"hours", "days"} else None,
         suggested_matchmaking_ready=suggestion.suggested_matchmaking_ready,
         suggested_is_public=suggestion.suggested_is_public,
         note=suggestion.note,
@@ -1113,6 +1123,8 @@ def create_account_suggestion(
         account_id=account.id,
         suggested_by_id=user.id,
         suggested_ban_type=payload.suggested_ban_type.value if payload.suggested_ban_type else None,
+        suggested_vac_live_value=payload.suggested_vac_live_value,
+        suggested_vac_live_unit=payload.suggested_vac_live_unit,
         suggested_matchmaking_ready=payload.suggested_matchmaking_ready,
         suggested_is_public=payload.suggested_is_public,
         note=payload.note.strip() if payload.note else None,
@@ -1179,6 +1191,12 @@ def resolve_account_suggestion(
             elif suggestion.suggested_ban_type in {BanType.VAC.value, BanType.GAME_BANNED.value}:
                 account.ban_status = BanStatus.BAN
                 account.vac_live_expires_at = None
+            elif suggestion.suggested_ban_type == BanType.VAC_LIVE.value:
+                amount = suggestion.suggested_vac_live_value or 20
+                unit = suggestion.suggested_vac_live_unit or "hours"
+                delta = timedelta(hours=amount) if unit == "hours" else timedelta(days=amount)
+                account.ban_status = BanStatus.VAC_LIVE
+                account.vac_live_expires_at = datetime.now(timezone.utc) + delta
         if suggestion.suggested_matchmaking_ready is not None:
             account.matchmaking_ready = suggestion.suggested_matchmaking_ready
         if suggestion.suggested_is_public is not None:

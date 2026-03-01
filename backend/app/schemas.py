@@ -146,6 +146,8 @@ class MassImportResponse(BaseModel):
 
 class AccountSuggestionCreate(BaseModel):
     suggested_ban_type: BanType | None = None
+    suggested_vac_live_value: int | None = Field(default=None, ge=1, le=365)
+    suggested_vac_live_unit: Literal["hours", "days"] | None = None
     suggested_matchmaking_ready: bool | None = None
     suggested_is_public: bool | None = None
     note: str | None = Field(default=None, min_length=1, max_length=500)
@@ -160,7 +162,11 @@ class AccountSuggestionCreate(BaseModel):
         ):
             raise ValueError("At least one suggested change or note is required")
         if self.suggested_ban_type == BanType.VAC_LIVE:
-            raise ValueError("VAC Live cannot be suggested without duration details")
+            if self.suggested_vac_live_value is None or self.suggested_vac_live_unit is None:
+                raise ValueError("VAC Live suggestions require suggested_vac_live_value and suggested_vac_live_unit")
+        else:
+            self.suggested_vac_live_value = None
+            self.suggested_vac_live_unit = None
         return self
 
 
@@ -174,6 +180,8 @@ class AccountSuggestionOut(BaseModel):
     suggested_by_id: int
     suggested_by_username: str
     suggested_ban_type: BanType | None = None
+    suggested_vac_live_value: int | None = None
+    suggested_vac_live_unit: Literal["hours", "days"] | None = None
     suggested_matchmaking_ready: bool | None = None
     suggested_is_public: bool | None = None
     note: str | None = None

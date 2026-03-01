@@ -105,6 +105,8 @@ class AccountSuggestion(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("steam_accounts.id"), index=True)
     suggested_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     suggested_ban_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    suggested_vac_live_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    suggested_vac_live_unit: Mapped[str | None] = mapped_column(String(8), nullable=True)
     suggested_matchmaking_ready: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     suggested_is_public: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
