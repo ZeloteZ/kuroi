@@ -121,6 +121,10 @@ def ensure_schema_extensions() -> None:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN online_status VARCHAR(32)")
         if "game_status" not in column_names:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN game_status VARCHAR(255)")
+        try:
+            connection.exec_driver_sql("UPDATE steam_accounts SET steam_id64 = NULL WHERE steam_id64 LIKE 'local_%'")
+        except Exception:
+            connection.exec_driver_sql("UPDATE steam_accounts SET steam_id64 = 'removed_' || id WHERE steam_id64 LIKE 'local_%'")
         connection.exec_driver_sql("UPDATE steam_accounts SET matchmaking_ready = FALSE WHERE matchmaking_ready IS NULL")
 
 
@@ -447,14 +451,14 @@ def create_account_record(
     username: str,
     email: str,
     password: str,
-    steam_id: str,
+    steam_id: str | None = None,
     matchmaking_ready: bool,
     is_public: bool,
     ban_type: BanType = BanType.NONE,
     vac_live_value: int | None = None,
     vac_live_unit: str | None = None,
 ) -> SteamAccount:
-    resolved_steam_id = steam_id.strip()
+    resolved_steam_id = steam_id.strip() if steam_id else None
     ban_status = BanStatus.CLEAN
     vac_live_expires_at = None
     if ban_type in {BanType.VAC, BanType.GAME_BANNED}:
@@ -832,7 +836,8 @@ async def create_account(
     db: Session = Depends(get_db),
 ):
     ensure_account_identity_unique(db, username=payload.username, email=payload.email)
-    ensure_steam_id_unique(db, steam_id=payload.steam_id)
+    if payload.steam_id:
+        ensure_steam_id_unique(db, steam_id=payload.steam_id)
 
     account = create_account_record(
         actor_id=actor.id,

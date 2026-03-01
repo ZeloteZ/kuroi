@@ -68,7 +68,7 @@ class SteamAccount(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    steam_id64: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    steam_id64: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
     username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     password: Mapped[str] = mapped_column(Text)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
