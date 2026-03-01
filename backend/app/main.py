@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import inspect
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from .database import Base, SessionLocal, engine, get_db
@@ -122,9 +122,19 @@ def ensure_schema_extensions() -> None:
         if "game_status" not in column_names:
             connection.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN game_status VARCHAR(255)")
         try:
-            connection.exec_driver_sql("UPDATE steam_accounts SET steam_id64 = NULL WHERE steam_id64 LIKE 'local_%'")
+            connection.execute(
+                text("UPDATE steam_accounts SET steam_id64 = NULL WHERE steam_id64 LIKE :pattern"),
+                {"pattern": "local_%"},
+            )
         except Exception:
-            connection.exec_driver_sql("UPDATE steam_accounts SET steam_id64 = 'removed_' || id WHERE steam_id64 LIKE 'local_%'")
+            connection.execute(
+                text(
+                    "UPDATE steam_accounts "
+                    "SET steam_id64 = 'removed_' || CAST(id AS TEXT) "
+                    "WHERE steam_id64 LIKE :pattern"
+                ),
+                {"pattern": "local_%"},
+            )
         connection.exec_driver_sql("UPDATE steam_accounts SET matchmaking_ready = FALSE WHERE matchmaking_ready IS NULL")
 
 
