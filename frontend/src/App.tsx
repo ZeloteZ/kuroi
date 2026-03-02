@@ -943,6 +943,13 @@ function App() {
 
   const getReviewSuggestions = (account: Account) => account.suggested_changes ?? [];
 
+  const formatVacLiveTarget = (value: number | null | undefined, unit: "hours" | "days" | null | undefined) => {
+    if (value && unit) {
+      return `${value} ${unit}`;
+    }
+    return "custom duration";
+  };
+
   const getRowClassName = (account: Account) => {
     return "hover:bg-zinc-800/35";
   };
@@ -1640,13 +1647,22 @@ function App() {
                   <div key={suggestion.id} className="rounded-xl border border-zinc-700/60 bg-zinc-900/50 p-3 space-y-2">
                     <p className="text-xs text-zinc-400">From {suggestion.suggested_by_username}</p>
                     <div className="flex flex-wrap gap-2 text-xs">
-                      {suggestion.suggested_ban_type && <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-100">Ban: {suggestion.suggested_ban_type}</span>}
-                      {suggestion.suggested_ban_type === "VACLive" && suggestion.suggested_vac_live_value && suggestion.suggested_vac_live_unit && (
-                        <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-100">Duration: {suggestion.suggested_vac_live_value} {suggestion.suggested_vac_live_unit}</span>
+                      {suggestion.suggested_ban_type && (
+                        <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-100">
+                          Ban: {suggestion.suggested_ban_type}
+                          {suggestion.suggested_ban_type === "VACLive"
+                            ? ` (${formatVacLiveTarget(suggestion.suggested_vac_live_value, suggestion.suggested_vac_live_unit)})`
+                            : ""}
+                        </span>
                       )}
                       {suggestion.suggested_matchmaking_ready !== null && suggestion.suggested_matchmaking_ready !== undefined && <span className="rounded-full border border-sky-300/40 bg-sky-500/10 px-2 py-0.5 text-sky-100">MM Ready: {suggestion.suggested_matchmaking_ready ? "Yes" : "No"}</span>}
                       {suggestion.suggested_is_public !== null && suggestion.suggested_is_public !== undefined && <span className="rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-100">Visibility: {suggestion.suggested_is_public ? "Public" : "Private"}</span>}
                     </div>
+                    {suggestion.suggested_ban_type === "VACLive" && (
+                      <p className="text-xs text-zinc-300">
+                        VAC Live will be set to: {formatVacLiveTarget(suggestion.suggested_vac_live_value, suggestion.suggested_vac_live_unit)}
+                      </p>
+                    )}
                     {suggestion.note && <p className="text-sm text-zinc-200">{suggestion.note}</p>}
                     <div className="flex gap-2">
                       <button
