@@ -1153,11 +1153,11 @@ function App() {
                   </button>
                 ))}
                 <label className="ml-auto flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-100">
-                  <input type="checkbox" checked={showPublicAccounts} onChange={(event) => handlePublicToggle(event.target.checked)} />
+                  <input className="anime-checkbox" type="checkbox" checked={showPublicAccounts} onChange={(event) => handlePublicToggle(event.target.checked)} />
                   Show public
                 </label>
                 <label className="relative flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 pr-7 text-xs text-zinc-100">
-                  <input type="checkbox" checked={showOnlyPendingReviews} onChange={(event) => setShowOnlyPendingReviews(event.target.checked)} />
+                  <input className="anime-checkbox" type="checkbox" checked={showOnlyPendingReviews} onChange={(event) => setShowOnlyPendingReviews(event.target.checked)} />
                   Pending review
                   {ownPendingReviewCount > 0 && (
                     <span className={`absolute -right-1.5 -top-1.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full border border-sky-200/70 bg-sky-400 px-1 text-[10px] font-semibold leading-none text-zinc-950 shadow-[0_0_10px_rgba(56,189,248,0.7)] ${hasNewPendingReviewsPulse ? "animate-pulse" : ""}`}>
@@ -1197,11 +1197,11 @@ function App() {
                   </>
                 )}
                 <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                  <input type="checkbox" checked={editAccount.matchmaking_ready} onChange={(event) => setEditAccount({ ...editAccount, matchmaking_ready: event.target.checked })} />
+                  <input className="anime-checkbox" type="checkbox" checked={editAccount.matchmaking_ready} onChange={(event) => setEditAccount({ ...editAccount, matchmaking_ready: event.target.checked })} />
                   Matchmaking ready (Level 2)
                 </label>
                 <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                  <input type="checkbox" checked={editAccount.is_public} onChange={(event) => setEditAccount({ ...editAccount, is_public: event.target.checked })} />
+                  <input className="anime-checkbox" type="checkbox" checked={editAccount.is_public} onChange={(event) => setEditAccount({ ...editAccount, is_public: event.target.checked })} />
                   Public visibility
                 </label>
                 <div className="md:col-span-3 flex gap-3">
@@ -1220,6 +1220,7 @@ function App() {
                     <tr>
                       <th className="px-3 py-2 text-left text-[11px] uppercase tracking-wider text-zinc-300">
                         <input
+                          className="anime-checkbox"
                           type="checkbox"
                           checked={allOwnOnPageSelected}
                           disabled={ownPaginatedAccounts.length === 0}
@@ -1246,6 +1247,7 @@ function App() {
                         <td className="px-3 py-2">
                           {currentUserId === account.owner_id ? (
                             <input
+                              className="anime-checkbox"
                               type="checkbox"
                               checked={selectedAccountIds.has(account.id)}
                               onChange={() => toggleAccountSelection(account.id)}
@@ -1328,7 +1330,7 @@ function App() {
                         </div>
                       </div>
                       {currentUserId === account.owner_id && (
-                        <input type="checkbox" checked={selectedAccountIds.has(account.id)} onChange={() => toggleAccountSelection(account.id)} />
+                        <input className="anime-checkbox" type="checkbox" checked={selectedAccountIds.has(account.id)} onChange={() => toggleAccountSelection(account.id)} />
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs text-zinc-300">
@@ -1350,7 +1352,7 @@ function App() {
                   {paginatedAccounts.map((account) => (
                     <div key={account.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-zinc-700/60 bg-zinc-900/40 px-3 py-2 text-xs">
                       {currentUserId === account.owner_id ? (
-                        <input type="checkbox" checked={selectedAccountIds.has(account.id)} onChange={() => toggleAccountSelection(account.id)} />
+                        <input className="anime-checkbox" type="checkbox" checked={selectedAccountIds.has(account.id)} onChange={() => toggleAccountSelection(account.id)} />
                       ) : (
                         <span className="text-zinc-600">-</span>
                       )}
@@ -1538,11 +1540,11 @@ function App() {
               )}
 
               <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                <input type="checkbox" checked={newAccount.matchmaking_ready} onChange={(event) => setNewAccount({ ...newAccount, matchmaking_ready: event.target.checked })} />
+                <input className="anime-checkbox" type="checkbox" checked={newAccount.matchmaking_ready} onChange={(event) => setNewAccount({ ...newAccount, matchmaking_ready: event.target.checked })} />
                 Matchmaking ready (Level 2)
               </label>
               <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                <input type="checkbox" checked={newAccount.is_public} onChange={(event) => setNewAccount({ ...newAccount, is_public: event.target.checked })} />
+                <input className="anime-checkbox" type="checkbox" checked={newAccount.is_public} onChange={(event) => setNewAccount({ ...newAccount, is_public: event.target.checked })} />
                 Public visibility
               </label>
               <button className="anime-primary-button md:col-span-3">Save Account</button>
@@ -1586,7 +1588,7 @@ function App() {
               />
               <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                 <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                  <input type="checkbox" checked={massImportPublic} onChange={(event) => setMassImportPublic(event.target.checked)} />
+                  <input className="anime-checkbox" type="checkbox" checked={massImportPublic} onChange={(event) => setMassImportPublic(event.target.checked)} />
                   Imported accounts are public
                 </label>
                 <button className="anime-primary-button px-4" disabled={isImporting || !massImportContent.trim()}>
@@ -1640,6 +1642,7 @@ function App() {
               <div className="rounded-xl border border-zinc-700/60 bg-zinc-900/40 p-4 space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
+                    className="anime-checkbox"
                     type="checkbox"
                     checked={multiEdit.apply_ban_type}
                     onChange={(e) => setMultiEdit({ ...multiEdit, apply_ban_type: e.target.checked })}
@@ -1687,6 +1690,7 @@ function App() {
               <div className="rounded-xl border border-zinc-700/60 bg-zinc-900/40 p-4 space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
+                    className="anime-checkbox"
                     type="checkbox"
                     checked={multiEdit.apply_mm_ready}
                     onChange={(e) => setMultiEdit({ ...multiEdit, apply_mm_ready: e.target.checked })}
@@ -1696,6 +1700,7 @@ function App() {
                 {multiEdit.apply_mm_ready && (
                   <label className="flex items-center gap-2 pl-6 cursor-pointer text-sm text-zinc-300">
                     <input
+                      className="anime-checkbox"
                       type="checkbox"
                       checked={multiEdit.matchmaking_ready}
                       onChange={(e) => setMultiEdit({ ...multiEdit, matchmaking_ready: e.target.checked })}
@@ -1709,6 +1714,7 @@ function App() {
               <div className="rounded-xl border border-zinc-700/60 bg-zinc-900/40 p-4 space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer">
                   <input
+                    className="anime-checkbox"
                     type="checkbox"
                     checked={multiEdit.apply_is_public}
                     onChange={(e) => setMultiEdit({ ...multiEdit, apply_is_public: e.target.checked })}
@@ -1718,6 +1724,7 @@ function App() {
                 {multiEdit.apply_is_public && (
                   <label className="flex items-center gap-2 pl-6 cursor-pointer text-sm text-zinc-300">
                     <input
+                      className="anime-checkbox"
                       type="checkbox"
                       checked={multiEdit.is_public}
                       onChange={(e) => setMultiEdit({ ...multiEdit, is_public: e.target.checked })}
