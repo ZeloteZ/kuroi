@@ -125,6 +125,7 @@ function App() {
   const [showPublicAccounts, setShowPublicAccounts] = useState(false);
   const [showOnlyPendingReviews, setShowOnlyPendingReviews] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [uiNotice, setUiNotice] = useState("");
   const [error, setError] = useState("");
   const [sessionNotice, setSessionNotice] = useState("");
   const [oidcVisible, setOidcVisible] = useState(oidcEnabledFromEnv);
@@ -165,6 +166,18 @@ function App() {
   const [hasNewPendingReviewsPulse, setHasNewPendingReviewsPulse] = useState(false);
   const lastOwnPendingReviewCountRef = useRef(0);
   const pendingPulseTimeoutRef = useRef<number | null>(null);
+  const uiNoticeTimeoutRef = useRef<number | null>(null);
+
+  const showUiNotice = (message: string) => {
+    setUiNotice(message);
+    if (uiNoticeTimeoutRef.current) {
+      window.clearTimeout(uiNoticeTimeoutRef.current);
+    }
+    uiNoticeTimeoutRef.current = window.setTimeout(() => {
+      setUiNotice("");
+      uiNoticeTimeoutRef.current = null;
+    }, 2500);
+  };
 
   const clearSession = (message?: string) => {
     setToken("");
@@ -316,6 +329,11 @@ function App() {
   useEffect(() => {
     if (ownPendingReviewCount > lastOwnPendingReviewCountRef.current) {
       setHasNewPendingReviewsPulse(true);
+      showUiNotice(
+        ownPendingReviewCount === 1
+          ? "You have 1 account with pending review"
+          : `You have ${ownPendingReviewCount} accounts with pending review`,
+      );
       if (pendingPulseTimeoutRef.current) {
         window.clearTimeout(pendingPulseTimeoutRef.current);
       }
@@ -342,6 +360,9 @@ function App() {
     return () => {
       if (pendingPulseTimeoutRef.current) {
         window.clearTimeout(pendingPulseTimeoutRef.current);
+      }
+      if (uiNoticeTimeoutRef.current) {
+        window.clearTimeout(uiNoticeTimeoutRef.current);
       }
     };
   }, []);
@@ -1008,6 +1029,7 @@ function App() {
   const copyAccountField = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
+      showUiNotice("Copied to clipboard");
     } catch {
       setError("Copy failed. Please copy manually.");
     }
@@ -1803,6 +1825,12 @@ function App() {
 
         {error && <div className="rounded-xl border border-rose-300/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
       </div>
+
+      {uiNotice && (
+        <div className="fixed bottom-4 right-4 z-40 rounded-xl border border-emerald-300/40 bg-emerald-500/15 px-3 py-2 text-xs text-emerald-100 shadow-lg backdrop-blur-sm">
+          {uiNotice}
+        </div>
+      )}
 
       {multiEditOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm px-4">
