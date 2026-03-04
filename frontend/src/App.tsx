@@ -110,6 +110,7 @@ async function apiFetch<T>(path: string, token: string, init?: RequestInit): Pro
 
 function App() {
   const ACCOUNTS_PER_PAGE = 10;
+  const LIVE_REFRESH_INTERVAL_MS = 5000;
   const [token, setToken] = useState(localStorage.getItem("kuroi_token") ?? "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -156,6 +157,7 @@ function App() {
   const [massImportPublic, setMassImportPublic] = useState(false);
   const [massImportResult, setMassImportResult] = useState<MassImportResponse | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [showManagementTools, setShowManagementTools] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
   const [hasNewPendingReviewsPulse, setHasNewPendingReviewsPulse] = useState(false);
@@ -385,7 +387,7 @@ function App() {
     loadAuthConfig();
   }, []);
 
-  const loadAccounts = async (filter = banFilter, includePublic = showPublicAccounts) => {
+  const loadAccounts = async (filter = banFilter, includePublic = showPublicAccounts, resetPage = true) => {
     if (!token) {
       return;
     }
@@ -401,7 +403,9 @@ function App() {
     try {
       const data = await apiFetch<Account[]>(`/accounts${query}`, token);
       setAccounts(data);
-      setCurrentPage(1);
+      if (resetPage) {
+        setCurrentPage(1);
+      }
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) {
         clearSession("Session expired. Please log in again.");
@@ -466,6 +470,42 @@ function App() {
 
     loadProfile();
   }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const refreshInBackground = async () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      await loadAccounts(banFilter, showPublicAccounts, false);
+    };
+
+    const intervalId = window.setInterval(() => {
+      void refreshInBackground();
+    }, LIVE_REFRESH_INTERVAL_MS);
+
+    const handleFocus = () => {
+      void refreshInBackground();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshInBackground();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [token, banFilter, showPublicAccounts]);
 
   const handleLocalLogin = async (event: FormEvent) => {
     event.preventDefault();
@@ -823,31 +863,40 @@ function App() {
     setError("");
 
     try {
-      await Promise.all(
-        selectedOwnAccounts.map((account) => {
-          const payload: Record<string, unknown> = {
-            username: account.username,
-            password: account.password,
-            email: account.email,
-            ban_type: multiEdit.apply_ban_type ? multiEdit.ban_type : account.ban_type,
-            matchmaking_ready: multiEdit.apply_mm_ready ? multiEdit.matchmaking_ready : account.matchmaking_ready,
-            is_public: multiEdit.apply_is_public ? multiEdit.is_public : account.is_public,
-          };
-          const steamId = account.steam_id64?.trim();
-          if (steamId) {
-            payload.steam_id = steamId;
-          }
-          const effectiveBanType = multiEdit.apply_ban_type ? multiEdit.ban_type : account.ban_type;
-          if (effectiveBanType === "VACLive" && multiEdit.apply_ban_type) {
-            payload.vac_live_value = Number(multiEdit.vac_live_value);
-            payload.vac_live_unit = multiEdit.vac_live_unit;
-          }
-          return apiFetch<Account>(`/accounts/${account.id}`, token, {
-            method: "PUT",
-            body: JSON.stringify(payload),
-          });
-        }),
-      );
+      const normalizedVacLiveValue = Number(multiEdit.vac_live_value);
+      if (
+        multiEdit.apply_ban_type &&
+        multiEdit.ban_type === "VACLive" &&
+        (!Number.isFinite(normalizedVacLiveValue) || normalizedVacLiveValue < 1 || normalizedVacLiveValue > 365)
+      ) {
+        throw new Error("VAC Live duration must be a number between 1 and 365");
+      }
+
+      for (const account of selectedOwnAccounts) {
+        const payload: Record<string, unknown> = {
+          username: account.username,
+          password: account.password,
+          email: account.email,
+          ban_type: multiEdit.apply_ban_type ? multiEdit.ban_type : account.ban_type,
+          matchmaking_ready: multiEdit.apply_mm_ready ? multiEdit.matchmaking_ready : account.matchmaking_ready,
+          is_public: multiEdit.apply_is_public ? multiEdit.is_public : account.is_public,
+        };
+        const steamId = account.steam_id64?.trim();
+        if (steamId) {
+          payload.steam_id = steamId;
+        }
+        const effectiveBanType = multiEdit.apply_ban_type ? multiEdit.ban_type : account.ban_type;
+        if (effectiveBanType === "VACLive" && multiEdit.apply_ban_type) {
+          payload.vac_live_value = normalizedVacLiveValue;
+          payload.vac_live_unit = multiEdit.vac_live_unit;
+        }
+
+        await apiFetch<Account>(`/accounts/${account.id}`, token, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      }
+
       setMultiEditOpen(false);
       await loadAccounts();
     } catch (requestError) {
@@ -944,8 +993,20 @@ function App() {
     }
   };
 
+  const isAccountActivelyBanned = (account: Account) => {
+    if (account.ban_type === "VAC" || account.ban_type === "GameBanned") {
+      return true;
+    }
+
+    if (account.ban_type === "VACLive") {
+      return Boolean(account.vac_live_remaining && account.vac_live_remaining !== "Expired");
+    }
+
+    return false;
+  };
+
   const getAvatarBorderClass = (account: Account) => {
-    if (account.ban_type !== "None") {
+    if (isAccountActivelyBanned(account)) {
       return "border-rose-500/90 shadow-[0_0_10px_rgba(244,63,94,0.45)]";
     }
 
@@ -962,7 +1023,7 @@ function App() {
   };
 
   const getDisplayStatus = (account: Account) => {
-    if (account.ban_type !== "None") {
+    if (isAccountActivelyBanned(account)) {
       return "Banned";
     }
     if (account.online_status === "InGame") {
@@ -972,6 +1033,14 @@ function App() {
   };
 
   const getAvatarHoverTitle = (account: Account) => account.steam_profile_name ?? "Unknown";
+
+  const getSteamProfileUrl = (account: Account) => {
+    const steamId = account.steam_id64?.trim();
+    if (!steamId) {
+      return null;
+    }
+    return `https://steamcommunity.com/profiles/${steamId}`;
+  };
 
   const getReviewSuggestions = (account: Account) => account.suggested_changes ?? [];
 
@@ -995,26 +1064,50 @@ function App() {
     { id: "stats", label: "Stats" },
   ];
 
-  const renderAccountAvatar = (account: Account, sizeClassName = "h-9 w-9") => (
-    <div className="group relative inline-flex">
-      {account.avatar_url ? (
-        <img
-          src={account.avatar_url}
-          alt="Avatar"
-          aria-label={getAvatarHoverTitle(account)}
-          className={`${sizeClassName} rounded-full border ${getAvatarBorderClass(account)}`}
-        />
-      ) : (
-        <div
-          aria-label={getAvatarHoverTitle(account)}
-          className={`${sizeClassName} rounded-full border ${getAvatarBorderClass(account)} bg-zinc-700`}
-        />
-      )}
+  const renderAccountAvatar = (account: Account, sizeClassName = "h-9 w-9") => {
+    const steamProfileUrl = getSteamProfileUrl(account);
+    const avatar = account.avatar_url ? (
+      <img
+        src={account.avatar_url}
+        alt="Avatar"
+        aria-label={getAvatarHoverTitle(account)}
+        className={`${sizeClassName} rounded-full border ${getAvatarBorderClass(account)}`}
+      />
+    ) : (
+      <div
+        aria-label={getAvatarHoverTitle(account)}
+        className={`${sizeClassName} rounded-full border ${getAvatarBorderClass(account)} bg-zinc-700`}
+      />
+    );
+
+    const tooltip = (
       <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 max-w-[240px] -translate-x-1/2 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-zinc-700 bg-zinc-950/95 px-2 py-1 text-xs text-zinc-100 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
         {getAvatarHoverTitle(account)}
       </div>
-    </div>
-  );
+    );
+
+    if (!steamProfileUrl) {
+      return (
+        <div className="group relative inline-flex">
+          {avatar}
+          {tooltip}
+        </div>
+      );
+    }
+
+    return (
+      <a
+        href={steamProfileUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group relative inline-flex cursor-pointer"
+        title="Open Steam profile"
+      >
+        {avatar}
+        {tooltip}
+      </a>
+    );
+  };
 
   const renderAccountActions = (account: Account, compact = false) => {
     if (currentUserId === account.owner_id) {
@@ -1508,60 +1601,72 @@ function App() {
               </div>
             </div>
 
-            <form onSubmit={handleCreateAccount} className="anime-panel grid gap-3 rounded-3xl p-4 md:grid-cols-3">
-              <input className="anime-input" placeholder="Username" value={newAccount.username} onChange={(event) => setNewAccount({ ...newAccount, username: event.target.value })} />
-              <input className="anime-input" placeholder="Email" value={newAccount.email} onChange={(event) => setNewAccount({ ...newAccount, email: event.target.value })} />
-              <input type="password" className="anime-input" placeholder="Password" value={newAccount.password} onChange={(event) => setNewAccount({ ...newAccount, password: event.target.value })} />
-              <input className="anime-input" placeholder="Steam ID64" value={newAccount.steam_id} onChange={(event) => setNewAccount({ ...newAccount, steam_id: event.target.value })} />
+            <div className="anime-panel space-y-4 rounded-3xl p-4">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-2xl border border-fuchsia-300/40 bg-fuchsia-500/10 px-4 py-3 text-left text-sm text-fuchsia-100 hover:bg-fuchsia-500/20"
+                onClick={() => setShowManagementTools((open) => !open)}
+              >
+                <span className="font-medium">Account Management Tools</span>
+                <span className="text-xs text-fuchsia-200">{showManagementTools ? "Hide" : "Show"}</span>
+              </button>
 
-              <select className="anime-input" value={newAccount.ban_type} onChange={(event) => setNewAccount({ ...newAccount, ban_type: event.target.value as BanType })}>
-                <option value="None">Not banned</option>
-                <option value="VAC">VAC</option>
-                <option value="GameBanned">Game Banned</option>
-                <option value="VACLive">VAC Live</option>
-              </select>
+              {showManagementTools && (
+                <div className="space-y-4">
+                  <form onSubmit={handleCreateAccount} className="anime-panel grid gap-3 rounded-3xl p-4 md:grid-cols-3">
+                    <input className="anime-input" placeholder="Username" value={newAccount.username} onChange={(event) => setNewAccount({ ...newAccount, username: event.target.value })} />
+                    <input className="anime-input" placeholder="Email" value={newAccount.email} onChange={(event) => setNewAccount({ ...newAccount, email: event.target.value })} />
+                    <input type="password" className="anime-input" placeholder="Password" value={newAccount.password} onChange={(event) => setNewAccount({ ...newAccount, password: event.target.value })} />
+                    <input className="anime-input" placeholder="Steam ID64" value={newAccount.steam_id} onChange={(event) => setNewAccount({ ...newAccount, steam_id: event.target.value })} />
 
-              {newAccount.ban_type === "VACLive" && (
-                <>
-                  <input
-                    className="anime-input"
-                    type="number"
-                    min={1}
-                    max={365}
-                    placeholder="Duration"
-                    value={newAccount.vac_live_value}
-                    onChange={(event) => setNewAccount({ ...newAccount, vac_live_value: event.target.value })}
-                  />
-                  <select className="anime-input" value={newAccount.vac_live_unit} onChange={(event) => setNewAccount({ ...newAccount, vac_live_unit: event.target.value as "hours" | "days" })}>
-                    <option value="hours">Hours</option>
-                    <option value="days">Days</option>
-                  </select>
-                </>
-              )}
+                    <select className="anime-input" value={newAccount.ban_type} onChange={(event) => setNewAccount({ ...newAccount, ban_type: event.target.value as BanType })}>
+                      <option value="None">Not banned</option>
+                      <option value="VAC">VAC</option>
+                      <option value="GameBanned">Game Banned</option>
+                      <option value="VACLive">VAC Live</option>
+                    </select>
 
-              <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                <input className="anime-checkbox" type="checkbox" checked={newAccount.matchmaking_ready} onChange={(event) => setNewAccount({ ...newAccount, matchmaking_ready: event.target.checked })} />
-                Matchmaking ready (Level 2)
-              </label>
-              <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                <input className="anime-checkbox" type="checkbox" checked={newAccount.is_public} onChange={(event) => setNewAccount({ ...newAccount, is_public: event.target.checked })} />
-                Public visibility
-              </label>
-              <button className="anime-primary-button md:col-span-3">Save Account</button>
-            </form>
+                    {newAccount.ban_type === "VACLive" && (
+                      <>
+                        <input
+                          className="anime-input"
+                          type="number"
+                          min={1}
+                          max={365}
+                          placeholder="Duration"
+                          value={newAccount.vac_live_value}
+                          onChange={(event) => setNewAccount({ ...newAccount, vac_live_value: event.target.value })}
+                        />
+                        <select className="anime-input" value={newAccount.vac_live_unit} onChange={(event) => setNewAccount({ ...newAccount, vac_live_unit: event.target.value as "hours" | "days" })}>
+                          <option value="hours">Hours</option>
+                          <option value="days">Days</option>
+                        </select>
+                      </>
+                    )}
 
-            <form onSubmit={handleCreateApiKey} className="anime-panel rounded-3xl p-4">
-              <p className="mb-3 text-sm text-zinc-300">Create an API key for script-based account imports (Stace-style automation).</p>
-              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-                <p className="flex items-center rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-zinc-200">Default key name: automation-script</p>
-                <button className="anime-primary-button px-4">Generate API Key</button>
-              </div>
-              {generatedApiKey && (
-                <div className="mt-3 space-y-2 rounded-xl border border-emerald-300/30 bg-emerald-500/10 p-3 text-sm">
-                  <p className="text-emerald-200">Copy this key now (shown once in clear text):</p>
-                  <p className="break-all rounded-md bg-zinc-950/80 p-2 font-mono text-emerald-200">{generatedApiKey}</p>
-                  <p className="text-zinc-300">Example script call:</p>
-                  <pre className="overflow-x-auto rounded-md bg-zinc-950/80 p-2 text-xs text-zinc-200">
+                    <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
+                      <input className="anime-checkbox" type="checkbox" checked={newAccount.matchmaking_ready} onChange={(event) => setNewAccount({ ...newAccount, matchmaking_ready: event.target.checked })} />
+                      Matchmaking ready (Level 2)
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
+                      <input className="anime-checkbox" type="checkbox" checked={newAccount.is_public} onChange={(event) => setNewAccount({ ...newAccount, is_public: event.target.checked })} />
+                      Public visibility
+                    </label>
+                    <button className="anime-primary-button md:col-span-3">Save Account</button>
+                  </form>
+
+                  <form onSubmit={handleCreateApiKey} className="anime-panel rounded-3xl p-4">
+                    <p className="mb-3 text-sm text-zinc-300">Create an API key for script-based account imports (Stace-style automation).</p>
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                      <p className="flex items-center rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-zinc-200">Default key name: automation-script</p>
+                      <button className="anime-primary-button px-4">Generate API Key</button>
+                    </div>
+                    {generatedApiKey && (
+                      <div className="mt-3 space-y-2 rounded-xl border border-emerald-300/30 bg-emerald-500/10 p-3 text-sm">
+                        <p className="text-emerald-200">Copy this key now (shown once in clear text):</p>
+                        <p className="break-all rounded-md bg-zinc-950/80 p-2 font-mono text-emerald-200">{generatedApiKey}</p>
+                        <p className="text-zinc-300">Example script call:</p>
+                        <pre className="overflow-x-auto rounded-md bg-zinc-950/80 p-2 text-xs text-zinc-200">
 {`curl -X POST ${apiBaseUrl}/accounts \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: ${generatedApiKey}" \\
@@ -1573,47 +1678,50 @@ function App() {
     "ban_type": "None",
     "is_public": false
   }'`}
-                  </pre>
+                        </pre>
+                      </div>
+                    )}
+                  </form>
+
+                  <form onSubmit={handleMassImport} className="anime-panel rounded-3xl p-4 space-y-3">
+                    <p className="text-sm text-zinc-300">Mass import format: <span className="font-mono">timestamp: email | username | password | steamid64</span></p>
+                    <textarea
+                      className="anime-input min-h-40 w-full"
+                      placeholder="2025-01-01 10:00:00: mail@example.com | account_name | secret_password | 76561198000000000"
+                      value={massImportContent}
+                      onChange={(event) => setMassImportContent(event.target.value)}
+                    />
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                      <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
+                        <input className="anime-checkbox" type="checkbox" checked={massImportPublic} onChange={(event) => setMassImportPublic(event.target.checked)} />
+                        Imported accounts are public
+                      </label>
+                      <button className="anime-primary-button px-4" disabled={isImporting || !massImportContent.trim()}>
+                        {isImporting ? "Importing..." : "Run Mass Import"}
+                      </button>
+                    </div>
+
+                    {massImportResult && (
+                      <div className="space-y-2 rounded-xl border border-zinc-700/60 bg-zinc-900/40 p-3 text-sm">
+                        <p>
+                          Created: <span className="font-semibold text-emerald-300">{massImportResult.created}</span> · Failed:{" "}
+                          <span className="font-semibold text-rose-300">{massImportResult.failed}</span>
+                        </p>
+                        {massImportResult.errors.length > 0 && (
+                          <ul className="max-h-40 overflow-auto space-y-1 rounded-lg border border-rose-300/30 bg-rose-500/10 p-2 text-xs text-rose-200">
+                            {massImportResult.errors.map((importError, index) => (
+                              <li key={`${importError.line}-${index}`}>
+                                Line {importError.line}: {importError.message}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </form>
                 </div>
               )}
-            </form>
-
-            <form onSubmit={handleMassImport} className="anime-panel rounded-3xl p-4 space-y-3">
-              <p className="text-sm text-zinc-300">Mass import format: <span className="font-mono">timestamp: email | username | password | steamid64</span></p>
-              <textarea
-                className="anime-input min-h-40 w-full"
-                placeholder="2025-01-01 10:00:00: mail@example.com | account_name | secret_password | 76561198000000000"
-                value={massImportContent}
-                onChange={(event) => setMassImportContent(event.target.value)}
-              />
-              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-                <label className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/90 px-3 py-2 text-sm text-zinc-100">
-                  <input className="anime-checkbox" type="checkbox" checked={massImportPublic} onChange={(event) => setMassImportPublic(event.target.checked)} />
-                  Imported accounts are public
-                </label>
-                <button className="anime-primary-button px-4" disabled={isImporting || !massImportContent.trim()}>
-                  {isImporting ? "Importing..." : "Run Mass Import"}
-                </button>
-              </div>
-
-              {massImportResult && (
-                <div className="space-y-2 rounded-xl border border-zinc-700/60 bg-zinc-900/40 p-3 text-sm">
-                  <p>
-                    Created: <span className="font-semibold text-emerald-300">{massImportResult.created}</span> · Failed:{" "}
-                    <span className="font-semibold text-rose-300">{massImportResult.failed}</span>
-                  </p>
-                  {massImportResult.errors.length > 0 && (
-                    <ul className="max-h-40 overflow-auto space-y-1 rounded-lg border border-rose-300/30 bg-rose-500/10 p-2 text-xs text-rose-200">
-                      {massImportResult.errors.map((importError, index) => (
-                        <li key={`${importError.line}-${index}`}>
-                          Line {importError.line}: {importError.message}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </form>
+            </div>
           </div>
         )}
 
