@@ -1,4 +1,4 @@
-<div style="text-align: center;">
+<div style="align: center;">
 <h3>kuroi</h3>
 
 ![Kuroi Logo](./frontend/src/assets/kuroi-logo.svg)
