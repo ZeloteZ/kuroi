@@ -1267,25 +1267,23 @@ function App() {
           <div className="space-y-6">
             <div className="anime-panel space-y-4 rounded-3xl p-4">
               <div className="grid gap-3 xl:grid-cols-[1.2fr_180px_220px_auto]">
-                <div className="relative">
+                <div className="flex items-center gap-2">
                   <input
-                    className="anime-input pr-11"
+                    className="anime-input"
                     placeholder="Search account or profile name"
                     value={usernameSearch}
                     onChange={(event) => setUsernameSearch(event.target.value)}
                   />
                   {usernameSearch && (
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                      <button
-                        type="button"
-                        className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-600/70 bg-zinc-900/70 text-xs text-zinc-300 hover:bg-zinc-700/80"
-                        onClick={() => setUsernameSearch("")}
-                        aria-label="Clear account name filter"
-                        title="Clear"
-                      >
-                        ✕
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-600/70 bg-zinc-900/70 text-sm text-zinc-300 hover:bg-zinc-700/80"
+                      onClick={() => setUsernameSearch("")}
+                      aria-label="Clear account name filter"
+                      title="Clear"
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
                 <select className="anime-input" value={banFilter} onChange={(event) => handleFilterChange(event.target.value as "all" | BanType)}>
