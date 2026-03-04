@@ -96,7 +96,6 @@ const isViewMode = (value: string | null): value is ViewMode =>
   value === "table" || value === "cards" || value === "compact" || value === "kanban" || value === "gallery" || value === "stats";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const oidcEnabledFromEnv = (import.meta.env.VITE_OIDC_ENABLED ?? "false") === "true";
 
 const resolveAppPage = (pathname: string): AppPage => {
   if (pathname === "/profile") {
@@ -202,7 +201,7 @@ function App() {
   const [uiNotice, setUiNotice] = useState("");
   const [error, setError] = useState("");
   const [sessionNotice, setSessionNotice] = useState("");
-  const [oidcVisible, setOidcVisible] = useState(oidcEnabledFromEnv);
+  const [oidcVisible, setOidcVisible] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentUsername, setCurrentUsername] = useState("");
   const [currentEmail, setCurrentEmail] = useState("");
@@ -514,10 +513,13 @@ function App() {
     if (!isLoggedIn && currentPageRoute === "profile") {
       navigateToPage("home");
     }
+    if (!isLoggedIn && currentPageRoute === "register" && !allowInviteLinkCreation) {
+      navigateToPage("home");
+    }
     if (isLoggedIn && currentPageRoute === "register") {
       navigateToPage("home");
     }
-  }, [isLoggedIn, currentPageRoute]);
+  }, [isLoggedIn, currentPageRoute, allowInviteLinkCreation]);
 
   useEffect(() => {
     const hash = window.location.hash.replace(/^#/, "");
@@ -565,13 +567,15 @@ function App() {
       try {
         const response = await fetch(`${apiBaseUrl}/auth/config`);
         if (!response.ok) {
+          setOidcVisible(false);
+          setAllowInviteLinkCreation(false);
           return;
         }
         const config = (await response.json()) as AuthConfig;
         setOidcVisible(config.oidc_enabled);
         setAllowInviteLinkCreation(config.allow_invite_link_creation);
       } catch {
-        setOidcVisible(oidcEnabledFromEnv);
+        setOidcVisible(false);
         setAllowInviteLinkCreation(false);
       }
     };
@@ -1549,7 +1553,7 @@ function App() {
                 </button>
               </div>
             )}
-            {currentPageRoute === "register" ? (
+            {currentPageRoute === "register" && allowInviteLinkCreation ? (
               <div className="mx-auto w-full max-w-lg space-y-4">
                 <form onSubmit={handleRegister} className="grid gap-3">
                   <input
@@ -1646,9 +1650,11 @@ function App() {
                   <button className="anime-primary-button">Login with Password</button>
                 </form>
 
-                <button type="button" className="anime-secondary-button w-full" onClick={() => navigateToPage("register")}>
-                  Register with Invite
-                </button>
+                {allowInviteLinkCreation && (
+                  <button type="button" className="anime-secondary-button w-full" onClick={() => navigateToPage("register")}>
+                    Register with Invite
+                  </button>
+                )}
 
                 {oidcVisible && (
                   <button type="button" className="anime-secondary-button w-full" onClick={handleOidcLogin}>
