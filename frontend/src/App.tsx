@@ -35,7 +35,7 @@ type UserProfile = {
   has_password?: boolean;
 };
 
-type AppPage = "home" | "profile";
+type AppPage = "home" | "profile" | "register";
 
 type AuthConfig = {
   oidc_enabled: boolean;
@@ -98,7 +98,15 @@ const isViewMode = (value: string | null): value is ViewMode =>
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const oidcEnabledFromEnv = (import.meta.env.VITE_OIDC_ENABLED ?? "false") === "true";
 
-const resolveAppPage = (pathname: string): AppPage => (pathname === "/profile" ? "profile" : "home");
+const resolveAppPage = (pathname: string): AppPage => {
+  if (pathname === "/profile") {
+    return "profile";
+  }
+  if (pathname === "/register") {
+    return "register";
+  }
+  return "home";
+};
 
 class ApiError extends Error {
   status: number;
@@ -107,6 +115,53 @@ class ApiError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+function formatApiDetail(detail: unknown): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const formatted = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+
+        const message = "msg" in item ? String(item.msg) : null;
+        const location = Array.isArray((item as { loc?: unknown }).loc)
+          ? (item as { loc: unknown[] }).loc
+              .map((part) => String(part))
+              .filter((part) => part !== "body")
+              .join(".")
+          : "";
+
+        if (message && location) {
+          return `${location}: ${message}`;
+        }
+        return message;
+      })
+      .filter((line): line is string => Boolean(line));
+
+    if (formatted.length > 0) {
+      return formatted.join(" · ");
+    }
+  }
+
+  if (detail && typeof detail === "object") {
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return "Request failed";
+    }
+  }
+
+  return "Request failed";
+}
+
+async function parseJsonSafe(response: Response): Promise<Record<string, unknown>> {
+  return response.json().catch(() => ({}));
 }
 
 async function apiFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
@@ -121,7 +176,7 @@ async function apiFetch<T>(path: string, token: string, init?: RequestInit): Pro
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new ApiError(error.detail ?? "Request failed", response.status);
+    throw new ApiError(formatApiDetail(error.detail), response.status);
   }
 
   return response.json() as Promise<T>;
@@ -204,7 +259,7 @@ function App() {
   };
 
   const navigateToPage = (page: AppPage) => {
-    const targetPath = page === "profile" ? "/profile" : "/";
+    const targetPath = page === "profile" ? "/profile" : page === "register" ? "/register" : "/";
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, "", targetPath);
     }
@@ -278,11 +333,35 @@ function App() {
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
   const [registerInviteCode, setRegisterInviteCode] = useState("");
+  const [registerTouched, setRegisterTouched] = useState({
+    username: false,
+    email: false,
+    password: false,
+    inviteCode: false,
+  });
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
   const [newPasswordInput, setNewPasswordInput] = useState("");
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const isLoggedIn = useMemo(() => token.length > 0, [token]);
+  const normalizedRegisterEmail = registerEmail.trim();
+  const isRegisterEmailValid = normalizedRegisterEmail.length > 0 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedRegisterEmail);
+  const isRegisterUsernameValid = registerUsername.trim().length >= 3;
+  const isRegisterPasswordValid = registerPassword.length >= 8;
+  const isRegisterInviteCodeValid = registerInviteCode.trim().length >= 6;
+  const isRegisterFormValid =
+    isRegisterUsernameValid &&
+    isRegisterPasswordValid &&
+    isRegisterInviteCodeValid &&
+    isRegisterEmailValid;
+  const registerUsernameInvalid = registerTouched.username && !isRegisterUsernameValid;
+  const registerEmailInvalid = registerTouched.email && !isRegisterEmailValid;
+  const registerPasswordInvalid = registerTouched.password && !isRegisterPasswordValid;
+  const registerInviteCodeInvalid = registerTouched.inviteCode && !isRegisterInviteCodeValid;
+  const registerUsernameValidHighlight = registerTouched.username && isRegisterUsernameValid;
+  const registerEmailValidHighlight = registerTouched.email && isRegisterEmailValid;
+  const registerPasswordValidHighlight = registerTouched.password && isRegisterPasswordValid;
+  const registerInviteCodeValidHighlight = registerTouched.inviteCode && isRegisterInviteCodeValid;
   const filteredAccounts = useMemo(() => {
     const query = usernameSearch.trim().toLowerCase();
     const base = showOnlyPendingReviews
@@ -432,7 +511,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn && currentPageRoute !== "home") {
+    if (!isLoggedIn && currentPageRoute === "profile") {
+      navigateToPage("home");
+    }
+    if (isLoggedIn && currentPageRoute === "register") {
       navigateToPage("home");
     }
   }, [isLoggedIn, currentPageRoute]);
@@ -469,10 +551,12 @@ function App() {
     }
 
     setRegisterInviteCode(inviteFromUrl);
+    setRegisterTouched((previous) => ({ ...previous, inviteCode: true }));
     setSessionNotice("Invite code was loaded from the invite link.");
+    setCurrentPageRoute("register");
     params.delete("invite");
     const newSearch = params.toString();
-    const targetUrl = `${window.location.pathname}${newSearch ? `?${newSearch}` : ""}${window.location.hash}`;
+    const targetUrl = `/register${newSearch ? `?${newSearch}` : ""}${window.location.hash}`;
     window.history.replaceState(null, "", targetUrl);
   }, []);
 
@@ -646,12 +730,17 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      const data = await response.json();
+      const data = await parseJsonSafe(response);
       if (!response.ok) {
-        throw new Error(data.detail ?? "Local login failed");
+        throw new Error(formatApiDetail(data.detail));
       }
-      setToken(data.access_token);
-      localStorage.setItem("kuroi_token", data.access_token);
+      const accessToken = typeof data.access_token === "string" ? data.access_token : "";
+      if (!accessToken) {
+        throw new Error("Login response is missing access token");
+      }
+      setToken(accessToken);
+      localStorage.setItem("kuroi_token", accessToken);
+      navigateToPage("home");
       await loadAccounts();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unexpected error");
@@ -663,11 +752,11 @@ function App() {
     setSessionNotice("");
     try {
       const response = await fetch(`${apiBaseUrl}/auth/oidc/login`);
-      const data = await response.json();
+      const data = await parseJsonSafe(response);
       if (!response.ok) {
-        throw new Error(data.detail ?? "OIDC login initialization failed");
+        throw new Error(formatApiDetail(data.detail));
       }
-      if (!data.authorization_url) {
+      if (typeof data.authorization_url !== "string" || !data.authorization_url) {
         throw new Error("OIDC authorization URL is missing");
       }
       window.location.href = data.authorization_url;
@@ -681,28 +770,41 @@ function App() {
     setError("");
     setSessionNotice("");
 
+    if (!isRegisterFormValid) {
+      setRegisterTouched({ username: true, email: true, password: true, inviteCode: true });
+      setError("Please fix the highlighted registration fields.");
+      return;
+    }
+
     try {
       const response = await fetch(`${apiBaseUrl}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: registerUsername,
-          email: registerEmail,
+          username: registerUsername.trim(),
+          email: normalizedRegisterEmail,
           password: registerPassword,
-          invite_code: registerInviteCode,
+          invite_code: registerInviteCode.trim(),
         }),
       });
-      const data = await response.json();
+      const data = await parseJsonSafe(response);
       if (!response.ok) {
-        throw new Error(data.detail ?? "Registration failed");
+        throw new Error(formatApiDetail(data.detail));
       }
 
-      setToken(data.access_token);
-      localStorage.setItem("kuroi_token", data.access_token);
+      const accessToken = typeof data.access_token === "string" ? data.access_token : "";
+      if (!accessToken) {
+        throw new Error("Register response is missing access token");
+      }
+
+      setToken(accessToken);
+      localStorage.setItem("kuroi_token", accessToken);
+      navigateToPage("home");
       setRegisterUsername("");
       setRegisterEmail("");
       setRegisterPassword("");
       setRegisterInviteCode("");
+      setRegisterTouched({ username: false, email: false, password: false, inviteCode: false });
       await loadAccounts();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unexpected registration error");
@@ -922,7 +1024,7 @@ function App() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.detail ?? "Delete failed");
+        throw new Error(formatApiDetail(payload.detail));
       }
       if (editingAccountId === accountId) {
         setEditingAccountId(null);
@@ -1434,7 +1536,7 @@ function App() {
         </header>
 
         {!isLoggedIn ? (
-          <div className="anime-panel rounded-3xl p-6">
+          <div className="mx-auto w-full max-w-xl anime-panel rounded-3xl p-6">
             {sessionNotice && (
               <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
                 <span>{sessionNotice}</span>
@@ -1447,24 +1549,113 @@ function App() {
                 </button>
               </div>
             )}
-            <form onSubmit={handleLocalLogin} className="grid gap-4 md:grid-cols-3">
-              <input className="anime-input" placeholder="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
-              <input type="password" className="anime-input" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} />
-              <button className="anime-primary-button">Login with Password</button>
-            </form>
+            {currentPageRoute === "register" ? (
+              <div className="mx-auto w-full max-w-lg space-y-4">
+                <form onSubmit={handleRegister} className="grid gap-3">
+                  <input
+                    className={`anime-input ${
+                      registerUsernameInvalid
+                        ? "border-rose-400/70 focus:border-rose-300"
+                        : registerUsernameValidHighlight
+                          ? "border-emerald-400/70 focus:border-emerald-300"
+                          : ""
+                    }`}
+                    placeholder="New username"
+                    value={registerUsername}
+                    onChange={(event) => setRegisterUsername(event.target.value)}
+                    onBlur={() => setRegisterTouched((previous) => ({ ...previous, username: true }))}
+                    minLength={3}
+                    maxLength={64}
+                    required
+                  />
+                  <input
+                    type="email"
+                    className={`anime-input ${
+                      registerEmailInvalid
+                        ? "border-rose-400/70 focus:border-rose-300"
+                        : registerEmailValidHighlight
+                          ? "border-emerald-400/70 focus:border-emerald-300"
+                          : ""
+                    }`}
+                    placeholder="Email"
+                    value={registerEmail}
+                    onChange={(event) => setRegisterEmail(event.target.value)}
+                    onBlur={() => setRegisterTouched((previous) => ({ ...previous, email: true }))}
+                    required
+                  />
+                  <input
+                    type="password"
+                    className={`anime-input ${
+                      registerPasswordInvalid
+                        ? "border-rose-400/70 focus:border-rose-300"
+                        : registerPasswordValidHighlight
+                          ? "border-emerald-400/70 focus:border-emerald-300"
+                          : ""
+                    }`}
+                    placeholder="New password"
+                    value={registerPassword}
+                    onChange={(event) => setRegisterPassword(event.target.value)}
+                    onBlur={() => setRegisterTouched((previous) => ({ ...previous, password: true }))}
+                    minLength={8}
+                    maxLength={128}
+                    required
+                  />
+                  <input
+                    className={`anime-input ${
+                      registerInviteCodeInvalid
+                        ? "border-rose-400/70 focus:border-rose-300"
+                        : registerInviteCodeValidHighlight
+                          ? "border-emerald-400/70 focus:border-emerald-300"
+                          : ""
+                    }`}
+                    placeholder="Invite code"
+                    value={registerInviteCode}
+                    onChange={(event) => setRegisterInviteCode(event.target.value)}
+                    onBlur={() => setRegisterTouched((previous) => ({ ...previous, inviteCode: true }))}
+                    minLength={6}
+                    maxLength={64}
+                    required
+                  />
+                  {registerUsernameInvalid && <p className="text-xs text-rose-300">Username must be at least 3 characters.</p>}
+                  {registerEmailInvalid && <p className="text-xs text-rose-300">Please enter a valid email address.</p>}
+                  {registerPasswordInvalid && <p className="text-xs text-rose-300">Password must be at least 8 characters.</p>}
+                  {registerInviteCodeInvalid && <p className="text-xs text-rose-300">Invite code must be at least 6 characters.</p>}
+                  <button className="anime-secondary-button" disabled={!isRegisterFormValid}>
+                    Register with Invite
+                  </button>
+                  {!isRegisterFormValid && (
+                    <p className="text-xs text-zinc-400">
+                      Requirements: username ≥ 3 chars, valid email, password ≥ 8 chars, invite code ≥ 6 chars.
+                    </p>
+                  )}
+                </form>
+                <button type="button" className="anime-secondary-button w-full" onClick={() => navigateToPage("home")}>
+                  Back to Login
+                </button>
+                {oidcVisible && (
+                  <button type="button" className="anime-secondary-button w-full" onClick={handleOidcLogin}>
+                    Login with OAuth (OIDC)
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="mx-auto w-full max-w-lg space-y-4">
+                <form onSubmit={handleLocalLogin} className="grid gap-3">
+                  <input className="anime-input" placeholder="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
+                  <input type="password" className="anime-input" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <button className="anime-primary-button">Login with Password</button>
+                </form>
 
-            <form onSubmit={handleRegister} className="mt-4 grid gap-4 md:grid-cols-4">
-              <input className="anime-input" placeholder="New username" value={registerUsername} onChange={(event) => setRegisterUsername(event.target.value)} required />
-              <input className="anime-input" placeholder="Email" value={registerEmail} onChange={(event) => setRegisterEmail(event.target.value)} required />
-              <input type="password" className="anime-input" placeholder="New password" value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)} required />
-              <input className="anime-input" placeholder="Invite code" value={registerInviteCode} onChange={(event) => setRegisterInviteCode(event.target.value)} required />
-              <button className="anime-secondary-button md:col-span-4">Register with Invite</button>
-            </form>
+                <button type="button" className="anime-secondary-button w-full" onClick={() => navigateToPage("register")}>
+                  Register with Invite
+                </button>
 
-            {oidcVisible && (
-              <button type="button" className="anime-secondary-button mt-4 w-full" onClick={handleOidcLogin}>
-                Login with OAuth (OIDC)
-              </button>
+                {oidcVisible && (
+                  <button type="button" className="anime-secondary-button w-full" onClick={handleOidcLogin}>
+                    Login with OAuth (OIDC)
+                  </button>
+                )}
+              </div>
             )}
           </div>
         ) : (

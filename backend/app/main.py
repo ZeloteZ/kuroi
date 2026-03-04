@@ -673,16 +673,19 @@ def ensure_bootstrap_invite_link() -> None:
         if user_count > 0:
             return
 
-        invite = db.scalar(
+        previous_invite = db.scalar(
             select(InviteCode)
             .where(InviteCode.is_active.is_(True), InviteCode.used_by_id.is_(None))
-            .order_by(InviteCode.created_at.asc())
+            .order_by(InviteCode.created_at.desc())
         )
-        if not invite:
-            invite = InviteCode(code=secrets.token_urlsafe(12), created_by_id=None)
-            db.add(invite)
-            db.commit()
-            db.refresh(invite)
+        if previous_invite:
+            previous_invite.is_active = False
+            db.add(previous_invite)
+
+        invite = InviteCode(code=secrets.token_urlsafe(12), created_by_id=None)
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
 
         invite_link = build_invite_link(invite.code)
         print("=== kuroi bootstrap invite ===")
