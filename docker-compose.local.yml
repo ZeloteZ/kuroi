@@ -30,7 +30,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://kuroi:${POSTGRES_PASSWORD:-kuroi_local_dev_password}@db:5432/kuroi
       APP_SECRET: ${APP_SECRET:-local-dev-only-secret-change-me}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      FRONTEND_URL: "http://localhost:3000"
       OIDC_ENABLED: "false"
       OIDC_ISSUER_URL: ""
       OIDC_CLIENT_ID: ""
@@ -38,8 +38,8 @@ services:
       OIDC_REDIRECT_URI: "http://localhost:3000/auth/oidc/callback"
       OIDC_TOKEN_AUTH_METHOD: "auto"
       OIDC_USE_PKCE: "true"
-      ALLOW_INVITE_LINK_CREATION: ${ALLOW_INVITE_LINK_CREATION:-true}
-      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      ALLOW_INVITE_LINK_CREATION: "true"
+      STEAM_API_KEY: "${STEAM_API_KEY:-}"
     depends_on:
       db:
         condition: service_healthy
